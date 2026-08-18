@@ -1,0 +1,6 @@
+{
+  "name": "Lifehut Developers",
+  "description": "Modern Construction & Turnkey Residential Home Platform in Chennai and Tamil Nadu with blueprint line animations, live counters, interactive quote request, Google reviews, and pricing packages.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
