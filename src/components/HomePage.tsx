@@ -745,16 +745,11 @@ export const HomePage: React.FC<HomePageProps> = ({
                       </span>
                     </div>
                     <p className="text-xs text-grey-600 mt-1.5 flex items-center gap-2">
-                      <span>{proj.builtUpArea || proj.plotSize || 'Turnkey Villa'}</span>
+                      <span>{proj.builtUpArea || 'Turnkey Villa'}</span>
                       <span>·</span>
                       <span>{proj.completionDate ? `Completed ${proj.completionDate}` : 'Handed over'}</span>
                     </p>
                   </div>
-                  {proj.clientTestimonial && (
-                    <p className="text-[11px] text-slate-500 italic mt-3 line-clamp-2 border-t border-slate-100 pt-2.5">
-                      "{proj.clientTestimonial}"
-                    </p>
-                  )}
                 </figcaption>
               </motion.figure>
             ))}

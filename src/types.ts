@@ -14,15 +14,15 @@ export interface Project {
   heroImage: string;
   gallery: string[];
   completionDate: string;
-  plotSize: string;
+  plotSize?: string;
   builtUpArea: string;
   floors: number;
   bedrooms: number;
   budget: string;
   location: string;
-  clientTestimonial: string;
-  clientName: string;
-  clientAvatar: string;
+  clientTestimonial?: string;
+  clientName?: string;
+  clientAvatar?: string;
   status: 'Completed' | 'Ongoing';
   isRecent?: boolean;
 }

@@ -4,7 +4,8 @@ import {
   Users, Briefcase, FileText, Settings as SettingsIcon,
   ShieldAlert, LogIn, Plus, Trash2, Edit, Save, Check, RefreshCw,
   Database, Upload, Copy, ExternalLink, CheckCircle2, Globe,
-  Sparkles, Star, Image as ImageIcon, Loader2, X, Link2, AlertCircle
+  Sparkles, Star, Image as ImageIcon, Loader2, X, Link2, AlertCircle,
+  MapPin, Calendar, Home
 } from 'lucide-react';
 import {
   isSupabaseConfigured,
@@ -77,7 +78,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [projectForm, setProjectForm] = useState({
     name: '',
     location: '',
-    completionDate: '',
+    completionDate: new Date().toISOString().split('T')[0],
     plotSize: '',
     builtUpArea: '',
     bedrooms: 3,
@@ -348,15 +349,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       name: projectForm.name,
       location: projectForm.location,
       completionDate: projectForm.completionDate,
-      plotSize: projectForm.plotSize,
+      plotSize: projectForm.builtUpArea || '',
       builtUpArea: projectForm.builtUpArea,
       bedrooms: projectForm.bedrooms,
       floors: projectForm.floors,
       budget: projectForm.budget,
       heroImage: projectForm.heroImage || 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=800&auto=format&fit=crop',
-      clientName: projectForm.clientName,
-      clientTestimonial: projectForm.clientTestimonial,
-      clientAvatar: projectForm.clientName ? projectForm.clientName.substring(0, 2).toUpperCase() : 'CL',
+      clientName: '',
+      clientTestimonial: '',
+      clientAvatar: '',
       status: 'Completed',
       gallery: [projectForm.heroImage],
       isRecent: Boolean(projectForm.isRecent)
@@ -608,6 +609,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  // Helper to ensure completionDate string works with <input type="date" />
+  const formatForDatePicker = (dateStr?: string): string => {
+    if (!dateStr) return new Date().toISOString().split('T')[0];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+    const parsed = new Date(dateStr);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().split('T')[0];
+    }
+    return new Date().toISOString().split('T')[0];
+  };
+
   const openEditProject = (proj: Project) => {
     setEditingItemType('project');
     setEditingItemId(proj.id);
@@ -616,15 +628,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setProjectForm({
       name: proj.name,
       location: proj.location,
-      completionDate: proj.completionDate,
-      plotSize: proj.plotSize,
-      builtUpArea: proj.builtUpArea,
+      completionDate: formatForDatePicker(proj.completionDate),
+      plotSize: proj.builtUpArea || proj.plotSize || '',
+      builtUpArea: proj.builtUpArea || proj.plotSize || '',
       bedrooms: proj.bedrooms || 3,
       floors: proj.floors || 2,
       budget: proj.budget || '',
       heroImage: proj.heroImage,
-      clientName: proj.clientName || '',
-      clientTestimonial: proj.clientTestimonial || '',
+      clientName: '',
+      clientTestimonial: '',
       isRecent: Boolean(proj.isRecent)
     });
   };
@@ -853,11 +865,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   setProjectImageUploadError(null);
                   setProjectImageMode('upload');
                   setProjectForm({
-                    name: '', location: '', completionDate: '2026-07-16',
-                    plotSize: '2400 sq.ft', builtUpArea: '3200 sq.ft',
-                    bedrooms: 4, floors: 2, budget: '90 Lakhs',
+                    name: '', location: '', completionDate: new Date().toISOString().split('T')[0],
+                    plotSize: '3,200 sq.ft', builtUpArea: '3,200 sq.ft',
+                    bedrooms: 3, floors: 2, budget: '85 Lakhs',
                     heroImage: '',
-                    clientName: 'Arun Kumar', clientTestimonial: 'Superb project delivery, built completely transparently.',
+                    clientName: '', clientTestimonial: '',
                     isRecent: true
                   });
                 }}
@@ -1593,45 +1605,97 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
               {editingItemType === 'project' && (
                 <form onSubmit={handleSaveProject} className="flex flex-col gap-4">
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-slate-500">Project Name</label>
-                    <input type="text" required value={projectForm.name} onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
+                    <label className="text-xs font-bold text-slate-700">Project Name</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Modern 4BHK Luxury Villa"
+                      value={projectForm.name}
+                      onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })}
+                      className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
+                    />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-slate-500">Location (Chennai Suburb)</label>
-                      <input type="text" required value={projectForm.location} onChange={(e) => setProjectForm({ ...projectForm, location: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-[#1A6DB5]" />
+                        <span>Location (Chennai Suburb)</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Keelkattalai, Chennai"
+                        value={projectForm.location}
+                        onChange={(e) => setProjectForm({ ...projectForm, location: e.target.value })}
+                        className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
+                      />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-slate-500">Completion Timeline</label>
-                      <input type="text" required value={projectForm.completionDate} onChange={(e) => setProjectForm({ ...projectForm, completionDate: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-[#1A6DB5]" />
+                        <span>Completion Date</span>
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={projectForm.completionDate}
+                        onChange={(e) => setProjectForm({ ...projectForm, completionDate: e.target.value })}
+                        className="border border-slate-200 px-4 py-2 text-xs rounded-xl focus:border-[#1A6DB5] outline-none bg-white font-medium text-slate-800"
+                      />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-slate-500">Plot Size</label>
-                      <input type="text" required value={projectForm.plotSize} onChange={(e) => setProjectForm({ ...projectForm, plotSize: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <Home className="w-3.5 h-3.5 text-[#1A6DB5]" />
+                        <span>Built-Up Area</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. 3,200 sq.ft"
+                        value={projectForm.builtUpArea}
+                        onChange={(e) => setProjectForm({ ...projectForm, builtUpArea: e.target.value, plotSize: e.target.value })}
+                        className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
+                      />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-slate-500">Built-Up Area</label>
-                      <input type="text" required value={projectForm.builtUpArea} onChange={(e) => setProjectForm({ ...projectForm, builtUpArea: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
+                      <label className="text-xs font-bold text-slate-700">Bedrooms (BHK)</label>
+                      <input
+                        type="number"
+                        required
+                        min={1}
+                        max={20}
+                        value={projectForm.bedrooms}
+                        onChange={(e) => setProjectForm({ ...projectForm, bedrooms: parseInt(e.target.value) || 1 })}
+                        className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-slate-700">Floors (Count)</label>
+                      <input
+                        type="number"
+                        required
+                        min={1}
+                        max={10}
+                        value={projectForm.floors}
+                        onChange={(e) => setProjectForm({ ...projectForm, floors: parseInt(e.target.value) || 1 })}
+                        className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
+                      />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-slate-500">Bedrooms (BHK)</label>
-                      <input type="number" required value={projectForm.bedrooms} onChange={(e) => setProjectForm({ ...projectForm, bedrooms: parseInt(e.target.value) })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-slate-500">Floors (Count)</label>
-                      <input type="number" required value={projectForm.floors} onChange={(e) => setProjectForm({ ...projectForm, floors: parseInt(e.target.value) })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-slate-500">Budget (Lakhs)</label>
-                      <input type="text" required value={projectForm.budget} onChange={(e) => setProjectForm({ ...projectForm, budget: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
-                    </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-slate-700">Turnkey Budget / Pricing</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. ₹85 Lakhs"
+                      value={projectForm.budget}
+                      onChange={(e) => setProjectForm({ ...projectForm, budget: e.target.value })}
+                      className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
+                    />
                   </div>
 
                   {/* Hero Presentation Image Upload / Management */}
@@ -1801,16 +1865,6 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                         <span>{projectImageUploadError}</span>
                       </div>
                     )}
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-slate-500">Client Name</label>
-                    <input type="text" value={projectForm.clientName} onChange={(e) => setProjectForm({ ...projectForm, clientName: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-slate-500">Client Testimonial</label>
-                    <textarea rows={2} value={projectForm.clientTestimonial} onChange={(e) => setProjectForm({ ...projectForm, clientTestimonial: e.target.value })} className="border border-slate-200 p-3 text-xs rounded-xl" />
                   </div>
 
                   {/* Selection Badge Tool for Home Recent Projects */}

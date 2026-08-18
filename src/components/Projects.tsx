@@ -191,18 +191,10 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
 
                   <div className="flex items-center justify-between py-2 border-b border-grey-200">
                     <span className="text-grey-600 text-xs flex items-center gap-2">
-                      <Ruler className="w-4 h-4 text-blue-700" />
-                      <span>Plot Area</span>
-                    </span>
-                    <span className="text-ink font-bold text-xs">{selectedProject.plotSize}</span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2 border-b border-grey-200">
-                    <span className="text-grey-600 text-xs flex items-center gap-2">
                       <Home className="w-4 h-4 text-blue-700" />
                       <span>Built-up Area</span>
                     </span>
-                    <span className="text-ink font-bold text-xs">{selectedProject.builtUpArea}</span>
+                    <span className="text-ink font-bold text-xs">{selectedProject.builtUpArea || selectedProject.plotSize}</span>
                   </div>
 
                   {selectedProject.bedrooms > 0 && (
@@ -249,29 +241,6 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
                   View Turnkey Packages
                 </button>
               </div>
-
-              {/* Client Testimonial card */}
-              {selectedProject.clientTestimonial && (
-                <div className="bg-white p-6 rounded-3xl border border-grey-200 shadow-soft flex flex-col gap-3 relative">
-                  <Quote className="absolute top-5 right-5 w-8 h-8 text-blue-700/10" />
-                  <div className="text-blue-700 font-display font-bold text-xs uppercase tracking-wider flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-blue-700" />
-                    <span>Client Review</span>
-                  </div>
-                  <p className="text-grey-600 text-xs leading-relaxed italic">
-                    "{selectedProject.clientTestimonial}"
-                  </p>
-                  <div className="flex items-center gap-3 pt-3 border-t border-grey-200">
-                    <div className="w-9 h-9 rounded-full bg-blue-700 text-white font-display font-bold text-xs flex items-center justify-center shadow-soft">
-                      {selectedProject.clientAvatar || 'C'}
-                    </div>
-                    <div>
-                      <div className="text-xs font-display font-bold text-ink">{selectedProject.clientName}</div>
-                      <div className="text-[11px] text-grey-500">{selectedProject.location}</div>
-                    </div>
-                  </div>
-                </div>
-              )}
 
             </div>
           </div>
@@ -395,21 +364,21 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
                       {/* Grid Specs */}
                       <div className="grid grid-cols-2 gap-2.5 text-xs">
                         <div className="flex items-center gap-2">
-                          <Ruler className="w-4 h-4 text-blue-700 flex-shrink-0" />
-                          <div>
-                            <div className="text-[10px] text-grey-500 uppercase font-semibold">Plot Area</div>
-                            <div className="font-bold text-ink text-xs">{p.plotSize}</div>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-2">
                           <Home className="w-4 h-4 text-blue-700 flex-shrink-0" />
                           <div>
                             <div className="text-[10px] text-grey-500 uppercase font-semibold">Built Area</div>
-                            <div className="font-bold text-ink text-xs">{p.builtUpArea}</div>
+                            <div className="font-bold text-ink text-xs">{p.builtUpArea || p.plotSize}</div>
                           </div>
                         </div>
 
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-blue-700 flex-shrink-0" />
+                          <div>
+                            <div className="text-[10px] text-grey-500 uppercase font-semibold">Handover</div>
+                            <div className="font-bold text-ink text-xs">{p.completionDate}</div>
+                          </div>
+                        </div>
+                        
                         <div className="flex items-center gap-2">
                           <Layers className="w-4 h-4 text-blue-700 flex-shrink-0" />
                           <div>
