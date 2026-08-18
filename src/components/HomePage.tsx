@@ -2,29 +2,60 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrustindexWidget } from './TrustindexWidget';
 import { GetInTouchForm } from './GetInTouchForm';
+import { Project, Service } from '../types';
+import { defaultServices } from '../data/defaults';
 
 interface HomePageProps {
   setActiveTab?: (tab: string) => void;
   phone?: string;
   email?: string;
   address?: string;
+  projects?: Project[];
+  services?: Service[];
+  stats?: {
+    projectsDone: string;
+    experienceYears: string;
+    clientSatisfaction: string;
+    hiddenCharges: string;
+  };
+  heroTitle?: string;
+  heroSubtitle?: string;
+  heroImage?: string;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
   setActiveTab,
-  phone = "+91 98765 43210",
-  email = "hello@lifehutdevelopers.com",
-  address = "No.24, 2nd Main Road, Nehru Nagar, Ambattur, Chennai, Tamil Nadu 600053"
+  phone = "+91 80721 63330",
+  email = "lifehutdevelopers@gmail.com",
+  address = "Lifehut Developers, Ground Floor, No. 4, Thirualluvar Nagar 1st Street, Keelkattalai, Chennai, Tamil Nadu 600117",
+  projects = [],
+  services = [],
+  stats,
+  heroTitle,
+  heroSubtitle,
+  heroImage
 }) => {
   // Counters State
-  const [expYears, setExpYears] = useState(0);
-  const [projectsCount, setProjectsCount] = useState(0);
-  const [clientSat, setClientSat] = useState(0);
-  const [sqftBuilt, setSqftBuilt] = useState(0);
-  const [googleRating, setGoogleRating] = useState(0);
-  const [googleReviewsCount, setGoogleReviewsCount] = useState(0);
+  const targetExp = parseInt(String(stats?.experienceYears || '12').replace(/[^0-9]/g, '')) || 12;
+  const targetProj = parseInt(String(stats?.projectsDone || '150').replace(/[^0-9]/g, '')) || 150;
+  const targetSat = parseInt(String(stats?.clientSatisfaction || '98').replace(/[^0-9]/g, '')) || 98;
+
+  const [expYears, setExpYears] = useState(targetExp);
+  const [projectsCount, setProjectsCount] = useState(targetProj);
+  const [clientSat, setClientSat] = useState(targetSat);
+  const [sqftBuilt, setSqftBuilt] = useState(500);
+  const [googleRating, setGoogleRating] = useState(4.9);
+  const [googleReviewsCount, setGoogleReviewsCount] = useState(112);
   const [countersStarted, setCountersStarted] = useState(false);
   const statsRef = useRef<HTMLDListElement>(null);
+
+  // Re-sync initial values when stats prop updates from admin or database
+  useEffect(() => {
+    setExpYears(targetExp);
+    setProjectsCount(targetProj);
+    setClientSat(targetSat);
+    setCountersStarted(false);
+  }, [targetExp, targetProj, targetSat]);
 
   // FAQ Accordion State
   const [openFaq, setOpenFaq] = useState<number | null>(null);
@@ -54,9 +85,9 @@ export const HomePage: React.FC<HomePageProps> = ({
             const progress = Math.min((now - start) / duration, 1);
             const eased = 1 - Math.pow(1 - progress, 3);
             
-            setExpYears(Math.round(eased * 12));
-            setProjectsCount(Math.round(eased * 150));
-            setClientSat(Math.round(eased * 98));
+            setExpYears(Math.round(eased * targetExp));
+            setProjectsCount(Math.round(eased * targetProj));
+            setClientSat(Math.round(eased * targetSat));
             setSqftBuilt(Math.round(eased * 500));
             setGoogleRating(parseFloat((eased * 4.9).toFixed(1)));
             setGoogleReviewsCount(Math.round(eased * 112));
@@ -77,7 +108,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     }
 
     return () => observer.disconnect();
-  }, [countersStarted]);
+  }, [countersStarted, targetExp, targetProj, targetSat]);
 
   const toggleFaq = (index: number) => {
     setOpenFaq(openFaq === index ? null : index);
@@ -108,6 +139,99 @@ export const HomePage: React.FC<HomePageProps> = ({
     }
   };
 
+  // Filter for projects selected by admin to be showcased on HomePage "Recent Projects"
+  const recentProjectsList = (projects && projects.length > 0)
+    ? (projects.filter(p => p.isRecent).length > 0
+        ? projects.filter(p => p.isRecent)
+        : projects.slice(0, 3))
+    : [];
+
+  // Dynamic services list sourced from props or defaultServices fallback
+  const servicesList = (services && services.length > 0) ? services : defaultServices;
+
+  const renderServiceIcon = (service: Service, index: number) => {
+    const id = (service.id || '').toLowerCase();
+    const title = (service.title || '').toLowerCase();
+
+    if (id.includes('renovation') || title.includes('renovation') || title.includes('remodel') || (!id && index === 1)) {
+      return (
+        <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
+          <path d="M14 3l7 7-9 9-7 1 1-7 8-8Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+          <path d="M13 6l5 5" stroke="currentColor" strokeWidth="1.7" />
+        </svg>
+      );
+    }
+    if (id.includes('commercial') || title.includes('commercial') || (!id && index === 2)) {
+      return (
+        <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
+          <path d="M3 21h18M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M10 21v-3h4v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        </svg>
+      );
+    }
+    if (id.includes('pre-contract') || title.includes('pre-contract') || title.includes('estimation') || title.includes('boq') || (!id && index === 3)) {
+      return (
+        <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
+          <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    }
+    if (id.includes('post-contract') || title.includes('post-contract') || title.includes('billing') || title.includes('execution') || (!id && index === 4)) {
+      return (
+        <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
+          <path d="M9 11l3 3L22 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    }
+    if (id.includes('tender') || title.includes('tender') || (!id && index === 5)) {
+      return (
+        <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" stroke="currentColor" strokeWidth="1.7" />
+        </svg>
+      );
+    }
+    return (
+      <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
+        <path d="M3 21h18M5 21V10l7-6 7 6v11M9 21v-7h6v7" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      </svg>
+    );
+  };
+
+  const getServiceActionLabel = (service: Service, index: number) => {
+    const id = (service.id || '').toLowerCase();
+    const title = (service.title || '').toLowerCase();
+    if (id.includes('new-home') || title.includes('home') || title.includes('house') || index === 0) {
+      return 'Explore package specs';
+    }
+    if (id.includes('renovation') || title.includes('renovation') || title.includes('remodel') || index === 1) {
+      return 'View renovation scope';
+    }
+    if (id.includes('commercial') || title.includes('commercial') || index === 2) {
+      return 'View commercial specs';
+    }
+    if (id.includes('pre-contract') || title.includes('pre-contract') || title.includes('estimation') || title.includes('boq') || index === 3) {
+      return 'View estimation & BOQ scope';
+    }
+    if (id.includes('post-contract') || title.includes('post-contract') || title.includes('execution') || title.includes('bill') || index === 4) {
+      return 'View execution management';
+    }
+    if (id.includes('tender') || title.includes('tender') || index === 5) {
+      return 'Explore tender support';
+    }
+    return `Explore ${service.title}`;
+  };
+
+  const handleProjectClick = (projectId: string) => {
+    if (setActiveTab) {
+      setActiveTab('projects');
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('nav-project', { detail: projectId }));
+      }, 50);
+    }
+  };
+
   return (
     <div className="font-body text-[#12161F] antialiased">
       
@@ -130,7 +254,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <span className="w-6 h-6 rounded-full bg-blue-400 border-2 border-white" />
                 <span className="w-6 h-6 rounded-full bg-blue-700 border-2 border-white" />
               </span>
-              <span className="text-sm font-semibold text-grey-800">Trusted by 150+ families across Tamil Nadu</span>
+              <span className="text-sm font-semibold text-grey-800">Trusted by {stats?.projectsDone || '150'}+ families across Tamil Nadu</span>
             </motion.div>
 
             <motion.h1 
@@ -139,7 +263,11 @@ export const HomePage: React.FC<HomePageProps> = ({
               transition={{ duration: 0.6, delay: 0.1 }}
               className="mt-6 font-display font-extrabold text-[2.6rem] leading-[1.08] sm:text-6xl sm:leading-[1.05] text-ink text-balance"
             >
-              We build homes you'll be <span className="text-blue-700">proud</span> to call yours.
+              {heroTitle ? (
+                <span>{heroTitle}</span>
+              ) : (
+                <>We build homes you'll be <span className="text-blue-700">proud</span> to call yours.</>
+              )}
             </motion.h1>
 
             <motion.p 
@@ -148,7 +276,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               transition={{ duration: 0.6, delay: 0.2 }}
               className="mt-6 text-lg text-grey-600 leading-relaxed max-w-xl"
             >
-              From the first sketch to the final coat of paint, Lifehut Developers plans, builds and hands over your project on time — with clear pricing and no surprises.
+              {heroSubtitle || "From the first sketch to the final coat of paint, Lifehut Developers plans, builds and hands over your project on time — with clear pricing and no surprises."}
             </motion.p>
 
             <motion.div 
@@ -181,17 +309,17 @@ export const HomePage: React.FC<HomePageProps> = ({
             <dl ref={statsRef} className="mt-12 grid grid-cols-3 max-w-md gap-6 border-t border-grey-200 pt-8">
               <div>
                 <dt className="sr-only">Years of experience</dt>
-                <dd className="font-display font-extrabold text-3xl text-ink"><span>{expYears || 12}</span>+</dd>
+                <dd className="font-display font-extrabold text-3xl text-ink"><span>{countersStarted ? expYears : targetExp}</span>+</dd>
                 <p className="text-sm text-grey-600 mt-1">Years experience</p>
               </div>
               <div>
                 <dt className="sr-only">Projects completed</dt>
-                <dd className="font-display font-extrabold text-3xl text-ink"><span>{projectsCount || 150}</span>+</dd>
+                <dd className="font-display font-extrabold text-3xl text-ink"><span>{countersStarted ? projectsCount : targetProj}</span>+</dd>
                 <p className="text-sm text-grey-600 mt-1">Projects done</p>
               </div>
               <div>
                 <dt className="sr-only">Client satisfaction rate</dt>
-                <dd className="font-display font-extrabold text-3xl text-ink"><span>{clientSat || 98}</span>%</dd>
+                <dd className="font-display font-extrabold text-3xl text-ink"><span>{countersStarted ? clientSat : targetSat}</span>%</dd>
                 <p className="text-sm text-grey-600 mt-1">Client satisfaction</p>
               </div>
             </dl>
@@ -219,7 +347,9 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <p className="text-xs text-grey-600 mt-1">Handover, guaranteed</p>
               </div>
               <div className="absolute bottom-8 right-6 float-slower bg-blue-700 text-white rounded-2xl px-4 py-3 shadow-lift">
-                <p className="font-display font-extrabold text-lg leading-none">₹0</p>
+                <p className="font-display font-extrabold text-lg leading-none">
+                  {stats?.hiddenCharges ? (stats.hiddenCharges.startsWith('₹') ? stats.hiddenCharges : `₹${stats.hiddenCharges}`) : '₹0'}
+                </p>
                 <p className="text-xs text-blue-100 mt-1">Hidden costs</p>
               </div>
             </div>
@@ -420,213 +550,39 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
 
           <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* 1. New Home Construction */}
-            <motion.article 
-              initial={{ opacity: 0, y: 45, scale: 0.95 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true, amount: 0.15 }}
-              transition={{ duration: 0.6, delay: 0.05, ease: [0.16, 1, 0.3, 1] }}
-              onClick={() => { 
-                if (setActiveTab) { 
-                  setActiveTab('services'); 
-                  setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent('nav-service', { detail: 'new-home-construction' }));
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }, 50);
-                } 
-              }}
-              className="lift-hover group bg-white rounded-2xl border border-grey-200 p-7 shadow-soft hover:shadow-card hover:border-blue-300 transition-all cursor-pointer flex flex-col justify-between"
-            >
-              <div>
-                <span className="grid place-items-center w-12 h-12 rounded-xl bg-blue-50 text-blue-700 group-hover:bg-blue-700 group-hover:text-white transition-colors" aria-hidden="true">
-                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
-                    <path d="M3 21h18M5 21V10l7-6 7 6v11M9 21v-7h6v7" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+            {servicesList.map((service, index) => (
+              <motion.article 
+                key={service.id || index}
+                initial={{ opacity: 0, y: 45, scale: 0.95 }}
+                whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                viewport={{ once: true, amount: 0.15 }}
+                transition={{ duration: 0.6, delay: 0.05 + (index % 6) * 0.1, ease: [0.16, 1, 0.3, 1] }}
+                onClick={() => { 
+                  if (setActiveTab) { 
+                    setActiveTab('services'); 
+                    setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent('nav-service', { detail: service.id }));
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }, 50);
+                  } 
+                }}
+                className="lift-hover group bg-white rounded-2xl border border-grey-200 p-7 shadow-soft hover:shadow-card hover:border-blue-300 transition-all cursor-pointer flex flex-col justify-between"
+              >
+                <div>
+                  <span className="grid place-items-center w-12 h-12 rounded-xl bg-blue-50 text-blue-700 group-hover:bg-blue-700 group-hover:text-white transition-colors" aria-hidden="true">
+                    {renderServiceIcon(service, index)}
+                  </span>
+                  <h3 className="mt-5 font-display font-bold text-lg text-ink group-hover:text-blue-700 transition-colors">{service.title}</h3>
+                  <p className="mt-2 text-sm text-grey-600 leading-relaxed">{service.description}</p>
+                </div>
+                <div className="mt-6 flex items-center gap-1.5 text-xs font-bold text-blue-700 group-hover:text-blue-900">
+                  <span>{getServiceActionLabel(service, index)}</span>
+                  <svg className="w-3.5 h-3.5 transform group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24" fill="none">
+                    <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                </span>
-                <h3 className="mt-5 font-display font-bold text-lg text-ink group-hover:text-blue-700 transition-colors">New Home Construction</h3>
-                <p className="mt-2 text-sm text-grey-600 leading-relaxed">We build your house from the ground up - Foundation, structure and finishing - to a design you approve at every step.</p>
-              </div>
-              <div className="mt-6 flex items-center gap-1.5 text-xs font-bold text-blue-700 group-hover:text-blue-900">
-                <span>Explore package specs</span>
-                <svg className="w-3.5 h-3.5 transform group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24" fill="none">
-                  <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-            </motion.article>
-
-            {/* 2. Renovation & Remodeling */}
-            <motion.article 
-              initial={{ opacity: 0, y: 45, scale: 0.95 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true, amount: 0.15 }}
-              transition={{ duration: 0.6, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
-              onClick={() => { 
-                if (setActiveTab) { 
-                  setActiveTab('services'); 
-                  setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent('nav-service', { detail: 'renovation-remodeling' }));
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }, 50);
-                } 
-              }}
-              className="lift-hover group bg-white rounded-2xl border border-grey-200 p-7 shadow-soft hover:shadow-card hover:border-blue-300 transition-all cursor-pointer flex flex-col justify-between"
-            >
-              <div>
-                <span className="grid place-items-center w-12 h-12 rounded-xl bg-blue-50 text-blue-700 group-hover:bg-blue-700 group-hover:text-white transition-colors" aria-hidden="true">
-                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
-                    <path d="M14 3l7 7-9 9-7 1 1-7 8-8Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-                    <path d="M13 6l5 5" stroke="currentColor" strokeWidth="1.7" />
-                  </svg>
-                </span>
-                <h3 className="mt-5 font-display font-bold text-lg text-ink group-hover:text-blue-700 transition-colors">Renovation &amp; Remodeling</h3>
-                <p className="mt-2 text-sm text-grey-600 leading-relaxed">Give an older home a fresh layout, better light and modern finishes, without disturbing the parts you love.</p>
-              </div>
-              <div className="mt-6 flex items-center gap-1.5 text-xs font-bold text-blue-700 group-hover:text-blue-900">
-                <span>View renovation scope</span>
-                <svg className="w-3.5 h-3.5 transform group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24" fill="none">
-                  <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-            </motion.article>
-
-            {/* 3. Commercial Spaces */}
-            <motion.article 
-              initial={{ opacity: 0, y: 45, scale: 0.95 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true, amount: 0.15 }}
-              transition={{ duration: 0.6, delay: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              onClick={() => { 
-                if (setActiveTab) { 
-                  setActiveTab('services'); 
-                  setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent('nav-service', { detail: 'commercial-spaces' }));
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }, 50);
-                } 
-              }}
-              className="lift-hover group bg-white rounded-2xl border border-grey-200 p-7 shadow-soft hover:shadow-card hover:border-blue-300 transition-all cursor-pointer flex flex-col justify-between"
-            >
-              <div>
-                <span className="grid place-items-center w-12 h-12 rounded-xl bg-blue-50 text-blue-700 group-hover:bg-blue-700 group-hover:text-white transition-colors" aria-hidden="true">
-                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
-                    <path d="M3 21h18M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M10 21v-3h4v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                  </svg>
-                </span>
-                <h3 className="mt-5 font-display font-bold text-lg text-ink group-hover:text-blue-700 transition-colors">Commercial Spaces</h3>
-                <p className="mt-2 text-sm text-grey-600 leading-relaxed">Shops, offices, warehouses and factory buildings, built to be practical, durable and ready on schedule.</p>
-              </div>
-              <div className="mt-6 flex items-center gap-1.5 text-xs font-bold text-blue-700 group-hover:text-blue-900">
-                <span>View commercial specs</span>
-                <svg className="w-3.5 h-3.5 transform group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24" fill="none">
-                  <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-            </motion.article>
-
-            {/* 4. Pre-Contract Services */}
-            <motion.article 
-              initial={{ opacity: 0, y: 45, scale: 0.95 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true, amount: 0.15 }}
-              transition={{ duration: 0.6, delay: 0.35, ease: [0.16, 1, 0.3, 1] }}
-              onClick={() => { 
-                if (setActiveTab) { 
-                  setActiveTab('services'); 
-                  setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent('nav-service', { detail: 'pre-contract-services' }));
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }, 50);
-                } 
-              }}
-              className="lift-hover group bg-white rounded-2xl border border-grey-200 p-7 shadow-soft hover:shadow-card hover:border-blue-300 transition-all cursor-pointer flex flex-col justify-between"
-            >
-              <div>
-                <span className="grid place-items-center w-12 h-12 rounded-xl bg-blue-50 text-blue-700 group-hover:bg-blue-700 group-hover:text-white transition-colors" aria-hidden="true">
-                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
-                    <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </span>
-                <h3 className="mt-5 font-display font-bold text-lg text-ink group-hover:text-blue-700 transition-colors">Pre-Contract Services</h3>
-                <p className="mt-2 text-sm text-grey-600 leading-relaxed">Build a strong project foundation - Estimation, BOQ, tender documents and technical support - before the contract begins.</p>
-              </div>
-              <div className="mt-6 flex items-center gap-1.5 text-xs font-bold text-blue-700 group-hover:text-blue-900">
-                <span>View estimation &amp; BOQ scope</span>
-                <svg className="w-3.5 h-3.5 transform group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24" fill="none">
-                  <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-            </motion.article>
-
-            {/* 5. Post-Contract Services */}
-            <motion.article 
-              initial={{ opacity: 0, y: 45, scale: 0.95 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true, amount: 0.15 }}
-              transition={{ duration: 0.6, delay: 0.45, ease: [0.16, 1, 0.3, 1] }}
-              onClick={() => { 
-                if (setActiveTab) { 
-                  setActiveTab('services'); 
-                  setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent('nav-service', { detail: 'post-contract-services' }));
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }, 50);
-                } 
-              }}
-              className="lift-hover group bg-white rounded-2xl border border-grey-200 p-7 shadow-soft hover:shadow-card hover:border-blue-300 transition-all cursor-pointer flex flex-col justify-between"
-            >
-              <div>
-                <span className="grid place-items-center w-12 h-12 rounded-xl bg-blue-50 text-blue-700 group-hover:bg-blue-700 group-hover:text-white transition-colors" aria-hidden="true">
-                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
-                    <path d="M9 11l3 3L22 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </span>
-                <h3 className="mt-5 font-display font-bold text-lg text-ink group-hover:text-blue-700 transition-colors">Post-Contract Services</h3>
-                <p className="mt-2 text-sm text-grey-600 leading-relaxed">Keep the project moving smoothly - Billing, documentation, quantity verification and technical support - throughout execution.</p>
-              </div>
-              <div className="mt-6 flex items-center gap-1.5 text-xs font-bold text-blue-700 group-hover:text-blue-900">
-                <span>View execution management</span>
-                <svg className="w-3.5 h-3.5 transform group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24" fill="none">
-                  <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-            </motion.article>
-
-            {/* 6. E-Tender Services */}
-            <motion.article 
-              initial={{ opacity: 0, y: 45, scale: 0.95 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true, amount: 0.15 }}
-              transition={{ duration: 0.6, delay: 0.55, ease: [0.16, 1, 0.3, 1] }}
-              onClick={() => { 
-                if (setActiveTab) { 
-                  setActiveTab('services'); 
-                  setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent('nav-service', { detail: 'e-tender-services' }));
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }, 50);
-                } 
-              }}
-              className="lift-hover group bg-white rounded-2xl border border-grey-200 p-7 shadow-soft hover:shadow-card hover:border-blue-300 transition-all cursor-pointer flex flex-col justify-between"
-            >
-              <div>
-                <span className="grid place-items-center w-12 h-12 rounded-xl bg-blue-50 text-blue-700 group-hover:bg-blue-700 group-hover:text-white transition-colors" aria-hidden="true">
-                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.7" />
-                    <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" stroke="currentColor" strokeWidth="1.7" />
-                  </svg>
-                </span>
-                <h3 className="mt-5 font-display font-bold text-lg text-ink group-hover:text-blue-700 transition-colors">E-Tender Services</h3>
-                <p className="mt-2 text-sm text-grey-600 leading-relaxed">Pursue the right tenders with confidence - From tender identification and documentation to online submission and technical support.</p>
-              </div>
-              <div className="mt-6 flex items-center gap-1.5 text-xs font-bold text-blue-700 group-hover:text-blue-900">
-                <span>Explore tender support</span>
-                <svg className="w-3.5 h-3.5 transform group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24" fill="none">
-                  <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-            </motion.article>
+                </div>
+              </motion.article>
+            ))}
           </div>
         </div>
       </section>
@@ -736,82 +692,72 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
 
           <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            <motion.figure 
-              initial={{ opacity: 0, y: 40, scale: 0.96 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true, amount: 0.15 }}
-              transition={{ duration: 0.6, delay: 0.05, ease: [0.16, 1, 0.3, 1] }}
-              onClick={() => { if (setActiveTab) { setActiveTab('projects'); window.scrollTo({ top: 0, behavior: 'smooth' }); } }}
-              className="lift-hover group relative rounded-2xl overflow-hidden shadow-soft hover:shadow-card border border-grey-200 bg-white cursor-pointer"
-            >
-              <div className="aspect-[4/3] bg-gradient-to-br from-blue-700 to-blue-900 relative flex items-center justify-center">
-                <svg className="absolute inset-0 w-full h-full opacity-25" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                  <path d="M0 70 L20 50 L35 60 L55 30 L75 45 L100 25 L100 100 L0 100 Z" fill="white" />
-                </svg>
-                <div className="z-10 text-white/90 text-xs font-mono font-bold uppercase tracking-wider bg-white/20 backdrop-blur px-3 py-1 rounded-full border border-white/30">
-                  Residential Villa
-                </div>
-              </div>
-              <figcaption className="p-5 bg-white">
-                <div className="flex items-center justify-between">
-                  <p className="font-display font-bold text-ink group-hover:text-blue-700 transition-colors">Independent House — Ambattur</p>
-                  <span className="text-xs font-bold text-blue-700">View →</span>
-                </div>
-                <p className="text-sm text-grey-600 mt-1">2,400 sq.ft · 4 months build · Handed over</p>
-              </figcaption>
-            </motion.figure>
+            {recentProjectsList.map((proj, idx) => (
+              <motion.figure 
+                key={proj.id}
+                initial={{ opacity: 0, y: 40, scale: 0.96 }}
+                whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                viewport={{ once: true, amount: 0.15 }}
+                transition={{ duration: 0.6, delay: 0.06 * (idx + 1), ease: [0.16, 1, 0.3, 1] }}
+                onClick={() => handleProjectClick(proj.id)}
+                className="lift-hover group relative rounded-2xl overflow-hidden shadow-soft hover:shadow-card border border-grey-200 bg-white cursor-pointer flex flex-col transition-all"
+              >
+                <div className="aspect-[4/3] bg-slate-100 relative overflow-hidden">
+                  <img 
+                    src={proj.heroImage || "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80"} 
+                    alt={proj.name}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-slate-950/20 to-transparent opacity-70 group-hover:opacity-80 transition-opacity" />
+                  
+                  {/* Top Badges */}
+                  <div className="absolute top-3 left-3 flex flex-wrap gap-1.5 z-10">
+                    <span className="text-white text-[10px] font-bold uppercase tracking-wider bg-black/50 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/20">
+                      {proj.bedrooms ? `${proj.bedrooms} BHK` : 'Villa'} {proj.floors ? `· ${proj.floors} Floors` : ''}
+                    </span>
+                    <span className="text-amber-950 text-[10px] font-extrabold uppercase tracking-wider bg-amber-400 backdrop-blur-md px-2 py-0.5 rounded-full shadow-sm">
+                      Recent Project
+                    </span>
+                  </div>
 
-            <motion.figure 
-              initial={{ opacity: 0, y: 40, scale: 0.96 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true, amount: 0.15 }}
-              transition={{ duration: 0.6, delay: 0.18, ease: [0.16, 1, 0.3, 1] }}
-              onClick={() => { if (setActiveTab) { setActiveTab('projects'); window.scrollTo({ top: 0, behavior: 'smooth' }); } }}
-              className="lift-hover group relative rounded-2xl overflow-hidden shadow-soft hover:shadow-card border border-grey-200 bg-white cursor-pointer"
-            >
-              <div className="aspect-[4/3] bg-gradient-to-br from-blue-500 to-blue-700 relative flex items-center justify-center">
-                <svg className="absolute inset-0 w-full h-full opacity-25" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                  <rect x="15" y="35" width="70" height="65" fill="white" />
-                  <path d="M10 35 L50 10 L90 35" stroke="white" strokeWidth="4" fill="none" />
-                </svg>
-                <div className="z-10 text-white/90 text-xs font-mono font-bold uppercase tracking-wider bg-white/20 backdrop-blur px-3 py-1 rounded-full border border-white/30">
-                  Duplex Luxury
+                  {/* Bottom Overlay Location & Budget */}
+                  <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white text-xs z-10">
+                    <span className="font-semibold drop-shadow-sm flex items-center gap-1">
+                      <span className="text-amber-400">📍</span> {proj.location}
+                    </span>
+                    {proj.budget && (
+                      <span className="font-bold bg-blue-700/90 text-white px-2 py-0.5 rounded-md text-[11px] shadow">
+                        {proj.budget}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <figcaption className="p-5 bg-white">
-                <div className="flex items-center justify-between">
-                  <p className="font-display font-bold text-ink group-hover:text-blue-700 transition-colors">Duplex Villa — Anna Nagar</p>
-                  <span className="text-xs font-bold text-blue-700">View →</span>
-                </div>
-                <p className="text-sm text-grey-600 mt-1">3,100 sq.ft · 6 months build · Handed over</p>
-              </figcaption>
-            </motion.figure>
 
-            <motion.figure 
-              initial={{ opacity: 0, y: 40, scale: 0.96 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true, amount: 0.15 }}
-              transition={{ duration: 0.6, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              onClick={() => { if (setActiveTab) { setActiveTab('projects'); window.scrollTo({ top: 0, behavior: 'smooth' }); } }}
-              className="lift-hover group relative rounded-2xl overflow-hidden shadow-soft hover:shadow-card border border-grey-200 bg-white cursor-pointer"
-            >
-              <div className="aspect-[4/3] bg-gradient-to-br from-grey-700 to-grey-900 relative flex items-center justify-center">
-                <svg className="absolute inset-0 w-full h-full opacity-25" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                  <rect x="10" y="20" width="35" height="80" fill="white" />
-                  <rect x="55" y="40" width="35" height="60" fill="white" />
-                </svg>
-                <div className="z-10 text-white/90 text-xs font-mono font-bold uppercase tracking-wider bg-white/20 backdrop-blur px-3 py-1 rounded-full border border-white/30">
-                  Complete Remodeling
-                </div>
-              </div>
-              <figcaption className="p-5 bg-white">
-                <div className="flex items-center justify-between">
-                  <p className="font-display font-bold text-ink group-hover:text-blue-700 transition-colors">Home Renovation — Coimbatore</p>
-                  <span className="text-xs font-bold text-blue-700">View →</span>
-                </div>
-                <p className="text-sm text-grey-600 mt-1">1,800 sq.ft · 2 months remodel · Handed over</p>
-              </figcaption>
-            </motion.figure>
+                <figcaption className="p-5 bg-white flex-1 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-display font-bold text-ink text-base group-hover:text-blue-700 transition-colors line-clamp-1">
+                        {proj.name}
+                      </p>
+                      <span className="text-xs font-bold text-blue-700 whitespace-nowrap group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
+                        View →
+                      </span>
+                    </div>
+                    <p className="text-xs text-grey-600 mt-1.5 flex items-center gap-2">
+                      <span>{proj.builtUpArea || proj.plotSize || 'Turnkey Villa'}</span>
+                      <span>·</span>
+                      <span>{proj.completionDate ? `Completed ${proj.completionDate}` : 'Handed over'}</span>
+                    </p>
+                  </div>
+                  {proj.clientTestimonial && (
+                    <p className="text-[11px] text-slate-500 italic mt-3 line-clamp-2 border-t border-slate-100 pt-2.5">
+                      "{proj.clientTestimonial}"
+                    </p>
+                  )}
+                </figcaption>
+              </motion.figure>
+            ))}
           </div>
 
           <motion.button 
@@ -1097,13 +1043,13 @@ export const HomePage: React.FC<HomePageProps> = ({
               Get Your Free Quote
             </button>
             <a 
-              href={`https://wa.me/${phone.replace(/[^0-9]/g, '')}`} 
+              href={`https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent('Hello Lifehut Developers, I would like to inquire about your services.')}`} 
               target="_blank" 
               rel="noopener noreferrer" 
-              className="inline-flex items-center gap-2 bg-white text-ink font-display font-semibold px-7 py-3.5 rounded-full border border-grey-200 shadow-soft hover:bg-grey-50 transition-colors"
+              className="inline-flex items-center gap-2 bg-[#25D366] hover:bg-[#20bd5a] text-white font-display font-semibold px-7 py-3.5 rounded-full shadow-soft hover:-translate-y-0.5 transition-all duration-300"
             >
-              <svg className="w-4 h-4 text-blue-700" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+              <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91C2.13 13.66 2.59 15.36 3.45 16.86L2.05 22L7.3 20.62C8.75 21.41 10.38 21.83 12.04 21.83C17.5 21.83 21.95 17.38 21.95 11.92C21.95 9.27 20.92 6.78 19.05 4.91C17.18 3.03 14.69 2 12.04 2ZM12.05 3.67C14.25 3.67 16.31 4.53 17.87 6.09C19.42 7.65 20.28 9.72 20.28 11.92C20.28 16.46 16.59 20.15 12.04 20.15C10.56 20.15 9.11 19.76 7.85 19.01L7.55 18.83L4.43 19.65L5.26 16.61L5.06 16.29C4.24 14.99 3.8 13.47 3.8 11.91C3.81 7.37 7.5 3.67 12.05 3.67ZM8.53 7.33C8.37 7.33 8.1 7.39 7.87 7.64C7.65 7.89 7.02 8.48 7.02 9.68C7.02 10.88 7.89 12.04 8.01 12.2C8.13 12.37 9.72 14.82 12.16 15.87C12.74 16.12 13.19 16.27 13.54 16.38C14.12 16.57 14.66 16.54 15.08 16.48C15.54 16.41 16.51 15.89 16.71 15.32C16.92 14.76 16.92 14.28 16.86 14.18C16.8 14.07 16.63 14.01 16.38 13.88C16.13 13.76 14.89 13.15 14.66 13.07C14.43 12.98 14.27 12.94 14.1 13.19C13.94 13.43 13.47 13.99 13.33 14.15C13.19 14.32 13.04 14.34 12.79 14.21C12.54 14.09 11.75 13.83 10.8 12.99C10.07 12.33 9.57 11.52 9.42 11.27C9.28 11.02 9.4 10.89 9.53 10.76C9.64 10.65 9.78 10.47 9.9 10.32C10.02 10.18 10.07 10.07 10.15 9.91C10.23 9.74 10.19 9.6 10.13 9.47C10.07 9.35 9.6 8.21 9.4 7.74C9.21 7.27 9.01 7.34 8.87 7.33C8.73 7.33 8.57 7.33 8.53 7.33Z" />
               </svg>
               <span>Chat on WhatsApp</span>
             </a>

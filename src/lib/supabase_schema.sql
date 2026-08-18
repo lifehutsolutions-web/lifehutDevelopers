@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS public.projects (
     client_name TEXT,
     client_avatar TEXT,
     status TEXT DEFAULT 'Completed',
+    is_recent BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

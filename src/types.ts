@@ -24,6 +24,7 @@ export interface Project {
   clientName: string;
   clientAvatar: string;
   status: 'Completed' | 'Ongoing';
+  isRecent?: boolean;
 }
 
 export interface Blog {

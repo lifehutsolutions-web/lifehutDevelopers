@@ -181,7 +181,8 @@ const defaultProjects: Project[] = [
     clientTestimonial: "Lifehut Developers exceeded our expectations in every single way. The luxury duplex is structurally flawless, and the architectural planning was done in a very responsive manner.",
     clientName: "Mr. Mohanraj",
     clientAvatar: "MR",
-    status: "Completed"
+    status: "Completed",
+    isRecent: true
   },
   {
     id: "coastal-business-park",
@@ -201,7 +202,8 @@ const defaultProjects: Project[] = [
     clientTestimonial: "The commercial building shows great engineering strength and precision. Delivered on time despite heavy monsoon seasons.",
     clientName: "Mr. Gani Iqbal",
     clientAvatar: "GI",
-    status: "Completed"
+    status: "Completed",
+    isRecent: true
   },
   {
     id: "anchor-logistics-hub",
@@ -220,7 +222,8 @@ const defaultProjects: Project[] = [
     clientTestimonial: "Extremely professional, well-engineered steel structure. They handled the deep SBC core tests and massive steel spans with outstanding expertise.",
     clientName: "Mr. Navin Kumar",
     clientAvatar: "NV",
-    status: "Completed"
+    status: "Completed",
+    isRecent: true
   }
 ];
 

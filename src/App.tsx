@@ -194,9 +194,9 @@ export default function App() {
       {/* Dynamic SEO Meta */}
       {activeTab === 'home' && (
         <SEO
-          title="Home | Luxury Villa Builders in Chennai"
-          description="Lifehut Developers: Award-winning turnkey residential builder in Chennai. Experience high-end engineering, transparent quotes, and absolute safety guarantee."
-          keywords="villas Chennai, turnkey construction, custom home building Chennai, Lifehut Developers"
+          title={settings?.seoTitle || "Top Residential Building Construction Company in Chennai | Lifehut Developers"}
+          description={settings?.seoDescription || "Leading residential building construction company in Chennai offering turnkey villa construction, transparent packages, and on-time handover."}
+          keywords={settings?.seoKeywords || "residential building construction company, turnkey house builders chennai, villa contractors"}
         />
       )}
       {activeTab === 'services' && (
@@ -269,6 +269,12 @@ export default function App() {
                 phone={phone}
                 email={email}
                 address={address}
+                projects={projects}
+                services={services}
+                stats={stats}
+                heroTitle={heroTitle}
+                heroSubtitle={heroSubtitle}
+                heroImage={heroImage}
               />
             </motion.div>
           )}

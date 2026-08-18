@@ -179,7 +179,8 @@ export const defaultProjects: Project[] = [
     clientTestimonial: "Lifehut Developers is the best residential building construction company in Chennai. They completed our 4BHK luxury duplex villa on schedule with zero cost overruns.",
     clientName: "Mr. Mohanraj",
     clientAvatar: "MR",
-    status: "Completed"
+    status: "Completed",
+    isRecent: true
   },
   {
     id: "keelkattalai-duplex-residence",
@@ -199,7 +200,8 @@ export const defaultProjects: Project[] = [
     clientTestimonial: "Outstanding structural workmanship and complete material transparency. The 3D elevation looks even better in real life than the digital mockup!",
     clientName: "Mr. Gani Iqbal",
     clientAvatar: "GI",
-    status: "Completed"
+    status: "Completed",
+    isRecent: true
   },
   {
     id: "omr-independent-house",
@@ -218,7 +220,8 @@ export const defaultProjects: Project[] = [
     clientTestimonial: "Extremely professional civil engineering team. Their meticulous structural engineering and foundation planning ensured complete stability for our multi-floor residence.",
     clientName: "Mr. Navin Kumar",
     clientAvatar: "NV",
-    status: "Completed"
+    status: "Completed",
+    isRecent: true
   }
 ];
 

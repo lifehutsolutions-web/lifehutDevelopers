@@ -22,33 +22,54 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured()
 // Helper to upload image files to Supabase Storage bucket 'cms-uploads'
 export async function uploadImageToSupabase(file: File, folder: string = 'general'): Promise<string | null> {
   if (!supabase || !isSupabaseConfigured()) {
-    console.warn('Supabase is not configured for image uploads.');
+    console.info('Supabase is not configured for remote storage upload, using local fallback.');
     return null;
   }
 
   try {
-    const fileExt = file.name.split('.').pop();
+    const fileExt = file.name.split('.').pop() || 'jpg';
     const fileName = `${folder}/${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
 
-    const { data, error } = await supabase.storage
+    let { data, error } = await supabase.storage
       .from('cms-uploads')
       .upload(fileName, file, {
         cacheControl: '3600',
         upsert: true
       });
 
+    // If bucket not found, attempt auto-creation via storage client API
+    if (error && (error.message?.toLowerCase().includes('bucket not found') || (error as any).error === 'Bucket not found')) {
+      try {
+        const { error: createErr } = await supabase.storage.createBucket('cms-uploads', { public: true });
+        if (!createErr) {
+          const retry = await supabase.storage
+            .from('cms-uploads')
+            .upload(fileName, file, {
+              cacheControl: '3600',
+              upsert: true
+            });
+          data = retry.data;
+          error = retry.error;
+        }
+      } catch {
+        // Ignore API permission limits when creating buckets with anon key
+      }
+    }
+
     if (error) {
-      console.error('Supabase storage upload error:', error);
+      console.warn('Supabase storage upload bypassed (bucket not initialized or restricted). Using optimized local storage fallback:', error.message || error);
       return null;
     }
+
+    if (!data?.path) return null;
 
     const { data: publicUrlData } = supabase.storage
       .from('cms-uploads')
       .getPublicUrl(data.path);
 
-    return publicUrlData.publicUrl;
+    return publicUrlData?.publicUrl || null;
   } catch (err) {
-    console.error('Failed uploading image to Supabase:', err);
+    console.warn('Image upload to Supabase storage caught exception, using local fallback:', err);
     return null;
   }
 }
@@ -95,6 +116,33 @@ export async function deleteSupabaseService(id: string): Promise<boolean> {
   return !error;
 }
 
+// Local helper to track recent project IDs if Supabase table lacks column
+const RECENT_PROJECTS_KEY = 'lifehut_recent_project_ids';
+
+function getLocalRecentIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(RECENT_PROJECTS_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw));
+  } catch {
+    return new Set();
+  }
+}
+
+function updateLocalRecentId(id: string, isRecent: boolean) {
+  try {
+    const set = getLocalRecentIds();
+    if (isRecent) {
+      set.add(id);
+    } else {
+      set.delete(id);
+    }
+    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(Array.from(set)));
+  } catch (e) {
+    console.error('Failed to update local recent project ids', e);
+  }
+}
+
 // --- PROJECTS DB HELPERS ---
 export async function fetchSupabaseProjects(): Promise<Project[] | null> {
   if (!supabase) return null;
@@ -103,28 +151,38 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
     console.error('Error fetching projects from Supabase:', error);
     return null;
   }
-  return data.map(item => ({
-    id: item.id,
-    name: item.name,
-    heroImage: item.hero_image || item.heroImage || '',
-    gallery: Array.isArray(item.gallery) ? item.gallery : [],
-    completionDate: item.completion_date || item.completionDate || '',
-    plotSize: item.plot_size || item.plotSize || '',
-    builtUpArea: item.built_up_area || item.builtUpArea || '',
-    floors: Number(item.floors || 1),
-    bedrooms: Number(item.bedrooms || 1),
-    budget: item.budget || '',
-    location: item.location || '',
-    clientTestimonial: item.client_testimonial || item.clientTestimonial || '',
-    clientName: item.client_name || item.clientName || '',
-    clientAvatar: item.client_avatar || item.clientAvatar || '',
-    status: item.status || 'Completed'
-  }));
+  const localRecentSet = getLocalRecentIds();
+  return data.map(item => {
+    const isRecentFromDb = item.is_recent ?? item.isRecent;
+    const isRecent = isRecentFromDb !== undefined ? Boolean(isRecentFromDb) : localRecentSet.has(item.id);
+    return {
+      id: item.id,
+      name: item.name,
+      heroImage: item.hero_image || item.heroImage || '',
+      gallery: Array.isArray(item.gallery) ? item.gallery : [],
+      completionDate: item.completion_date || item.completionDate || '',
+      plotSize: item.plot_size || item.plotSize || '',
+      builtUpArea: item.built_up_area || item.builtUpArea || '',
+      floors: Number(item.floors || 1),
+      bedrooms: Number(item.bedrooms || 1),
+      budget: item.budget || '',
+      location: item.location || '',
+      clientTestimonial: item.client_testimonial || item.clientTestimonial || '',
+      clientName: item.client_name || item.clientName || '',
+      clientAvatar: item.client_avatar || item.clientAvatar || '',
+      status: item.status || 'Completed',
+      isRecent
+    };
+  });
 }
 
 export async function saveSupabaseProject(project: Project): Promise<boolean> {
   if (!supabase) return false;
-  const payload = {
+
+  // Persist locally as fallback in case remote table hasn't added column yet
+  updateLocalRecentId(project.id, Boolean(project.isRecent));
+
+  const payload: Record<string, any> = {
     id: project.id,
     name: project.name,
     hero_image: project.heroImage,
@@ -139,11 +197,28 @@ export async function saveSupabaseProject(project: Project): Promise<boolean> {
     client_testimonial: project.clientTestimonial,
     client_name: project.clientName,
     client_avatar: project.clientAvatar,
-    status: project.status
+    status: project.status,
+    is_recent: Boolean(project.isRecent)
   };
-  const { error } = await supabase.from('projects').upsert(payload);
-  if (error) console.error('Error saving project to Supabase:', error);
-  return !error;
+
+  let { error } = await supabase.from('projects').upsert(payload);
+
+  // If column 'is_recent' does not exist in user's Supabase schema (PGRST204), retry gracefully without it
+  if (error && (error.code === 'PGRST204' || error.message?.includes('is_recent'))) {
+    console.warn('Supabase projects table lacks is_recent column, saving project with fallback:', error.message);
+    delete payload.is_recent;
+    const retry = await supabase.from('projects').upsert(payload);
+    if (!retry.error) {
+      error = null;
+    } else {
+      console.error('Error saving project to Supabase after fallback:', retry.error);
+      return false;
+    }
+  } else if (error) {
+    console.error('Error saving project to Supabase:', error);
+    return false;
+  }
+  return true;
 }
 
 export async function deleteSupabaseProject(id: string): Promise<boolean> {
@@ -245,11 +320,15 @@ export async function insertSupabaseQuote(quote: QuoteRequest): Promise<boolean>
 // --- SETTINGS DB HELPERS ---
 export async function fetchSupabaseSettings(): Promise<Settings | null> {
   if (!supabase) return null;
-  const { data, error } = await supabase.from('settings').select('*').eq('id', 'site_settings').single();
-  if (error || !data) {
-    console.warn('No existing settings found in Supabase or error:', error?.message);
+  let res = await supabase.from('settings').select('*').limit(1);
+  if (res.error || !res.data || res.data.length === 0) {
+    res = await supabase.from('site_settings').select('*').limit(1);
+  }
+  if (res.error || !res.data || res.data.length === 0) {
+    console.warn('No existing settings found in Supabase:', res.error?.message);
     return null;
   }
+  const data = res.data[0];
   return {
     heroTitle: data.hero_title || '',
     heroSubtitle: data.hero_subtitle || '',
@@ -297,8 +376,17 @@ export async function saveSupabaseSettings(settings: Settings): Promise<boolean>
     stats: settings.stats,
     updated_at: new Date().toISOString()
   };
-  const { error } = await supabase.from('settings').upsert(payload);
-  if (error) console.error('Error saving settings to Supabase:', error);
+
+  let { error } = await supabase.from('settings').upsert(payload);
+  if (error) {
+    console.warn('Upsert to settings failed, trying site_settings table:', error.message);
+    const retry = await supabase.from('site_settings').upsert(payload);
+    if (!retry.error) {
+      error = null;
+    } else {
+      console.error('Error saving settings to Supabase:', retry.error);
+    }
+  }
   return !error;
 }
 
