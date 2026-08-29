@@ -1001,7 +1001,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </section>
 
-      {/* ============ GOOGLE REVIEWS ============ */}
+      {/* ============ GOOGLE REVIEWS ============
       <section aria-label="Google reviews" className="py-12 lg:py-14 bg-grey-50 border-y border-grey-200 overflow-hidden">
         <div className="max-w-7xl mx-auto px-6 lg:px-8">
           <motion.div 
@@ -1013,16 +1013,16 @@ export const HomePage: React.FC<HomePageProps> = ({
           >
             <p className="font-display font-bold text-blue-700 text-sm tracking-wide uppercase">Verified reviews</p>
             <h2 className="mt-3 font-display font-extrabold text-3xl sm:text-4xl text-ink text-balance">What clients say about us on Google</h2>
-          </motion.div>
+          </motion.div> */}
 
-          {/* Live Trustindex Google Reviews Embedded Widget */}
+          {/* Live Trustindex Google Reviews Embedded Widget
           <div className="mt-8">
             <TrustindexWidget />
-          </div>
+          </div>  
 
           <p className="mt-6 text-center text-xs text-grey-400">Verified Google Business Profile reviews for Lifehut Developers, Chennai.</p>
         </div>
-      </section>
+      </section>*/}
 
       {/* ============ CTA BANNER ============ */}
       <section className="relative py-12 lg:py-14 mesh border-y border-grey-200 overflow-hidden">

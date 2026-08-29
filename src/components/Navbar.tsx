@@ -181,11 +181,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           className="flex items-center gap-3 focus:outline-none cursor-pointer group"
           aria-label="Lifehut Developers Home"
         >
-          <div className="relative w-50 h-50 rounded-xl overflow-hidden flex items-center justify-center text-white shadow-soft transition-colors flex-shrink-0">
+          <div className="relative flex items-center justify-center flex-shrink-0 h-16">
             <img
               src={logoImg}
               alt="Lifehut Developers"
-              className="w-full h-full object-contain p-0.5 z-10 bg-transparent"
+              className="h-30 md:h-30 max-h-30 w-auto max-w-[200px] md:max-w-[260px] object-contain bg-transparent"
               onError={(e) => {
                 const target = e.currentTarget;
                 if (target.src !== '/logo.png') {
@@ -193,9 +193,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }
               }}
             />
-            
           </div>
-         
         </button>
 
         {/* Desktop Navigation Links */}
