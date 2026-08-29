@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Project } from '../types';
-import { Calendar, Ruler, Home, BedDouble, Layers, MapPin, DollarSign, Quote, ArrowLeft, Eye, ZoomIn, Sparkles } from 'lucide-react';
+import { Calendar, Ruler, Home, BedDouble, Layers, MapPin, DollarSign, Quote, ArrowLeft, Eye, ZoomIn, Sparkles, User, Tag } from 'lucide-react';
 import { Breadcrumbs } from './Breadcrumbs';
 import { InteractiveLightbox } from './InteractiveLightbox';
 import { motion, AnimatePresence } from 'motion/react';
@@ -44,14 +44,52 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
     setLightboxOpen(true);
   };
 
-  const categories = ['All', 'Luxury Villas', 'Duplex Residences', 'Modern Homes'];
+  const categories = ['All', 'Independent Villa', 'Apartments', 'Commercial', 'Industrial', 'Infra'];
 
   const filteredProjects = projects.filter(p => {
     if (activeCategory === 'All') return true;
-    if (activeCategory === 'Luxury Villas') return p.name.toLowerCase().includes('villa') || (p.budget && p.budget.includes('Crore'));
-    if (activeCategory === 'Duplex Residences') return p.floors >= 2 || p.name.toLowerCase().includes('duplex');
-    if (activeCategory === 'Modern Homes') return p.bedrooms >= 4 || p.name.toLowerCase().includes('smart') || p.name.toLowerCase().includes('contemporary');
-    return true;
+    const target = activeCategory.toLowerCase().trim();
+    
+    // Check if project has tags defined
+    if (Array.isArray(p.tags) && p.tags.length > 0) {
+      return p.tags.some(t => {
+        if (!t) return false;
+        const tLower = t.toLowerCase().trim();
+        if (tLower === target) return true;
+        if (tLower.includes(target) || target.includes(tLower)) return true;
+        
+        // Match Villa tags
+        if (target.includes('villa')) {
+          return tLower.includes('villa') || tLower.includes('independent');
+        }
+        // Match Apartment tags
+        if (target.includes('apartment')) {
+          return tLower.includes('apartment') || tLower.includes('flat');
+        }
+        // Match Commercial tags
+        if (target.includes('commercial')) {
+          return tLower.includes('commercial') || tLower.includes('office') || tLower.includes('retail');
+        }
+        // Match Industrial tags
+        if (target.includes('industrial')) {
+          return tLower.includes('industrial') || tLower.includes('warehouse') || tLower.includes('factory');
+        }
+        // Match Infra tags
+        if (target.includes('infra')) {
+          return tLower.includes('infra') || tLower.includes('civil') || tLower.includes('logistics');
+        }
+        return false;
+      });
+    }
+    
+    // Fallback only if project has no tags array or empty tags
+    const nameLower = (p.name || '').toLowerCase();
+    if (target.includes('villa')) return nameLower.includes('villa') || nameLower.includes('house') || nameLower.includes('home') || nameLower.includes('residence');
+    if (target.includes('apartment')) return nameLower.includes('apartment') || nameLower.includes('flat');
+    if (target.includes('commercial')) return nameLower.includes('commercial') || nameLower.includes('park') || nameLower.includes('office');
+    if (target.includes('industrial')) return nameLower.includes('industrial') || nameLower.includes('hub') || nameLower.includes('warehouse');
+    if (target.includes('infra')) return nameLower.includes('infra') || nameLower.includes('civil') || nameLower.includes('logistics');
+    return false;
   });
 
   if (selectedProject) {
@@ -123,13 +161,20 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
 
                 <div className="absolute bottom-6 left-6 right-6 text-white z-10 flex items-end justify-between">
                   <div>
-                    <span className={`text-xs font-display font-bold tracking-wide uppercase backdrop-blur-md px-3 py-1 rounded-full border shadow-soft ${
-                      selectedProject.status === 'Ongoing'
-                        ? 'bg-amber-500 text-slate-950 border-amber-300 font-extrabold'
-                        : 'text-blue-700 bg-white/95 border-grey-200'
-                    }`}>
-                      {selectedProject.status === 'Ongoing' ? 'On-going Construction' : 'Verified Completed Turnkey'}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`text-xs font-display font-bold tracking-wide uppercase backdrop-blur-md px-3 py-1 rounded-full border shadow-soft ${
+                        selectedProject.status === 'Ongoing'
+                          ? 'bg-amber-500 text-slate-950 border-amber-300 font-extrabold'
+                          : 'text-blue-700 bg-white/95 border-grey-200'
+                      }`}>
+                        {selectedProject.status === 'Ongoing' ? 'On-going Construction' : 'Verified Completed Turnkey'}
+                      </span>
+                      {selectedProject.tags && selectedProject.tags.length > 0 && selectedProject.tags.map((t) => (
+                        <span key={t} className="text-xs font-display font-semibold tracking-wide bg-blue-900/80 text-blue-100 border border-blue-400/40 backdrop-blur-md px-2.5 py-1 rounded-full">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
                     <h1 className="font-display text-2xl sm:text-3xl lg:text-4xl font-extrabold mt-3 text-white tracking-tight">{selectedProject.name}</h1>
                     <div className="flex items-center gap-1.5 text-xs text-grey-200 mt-1">
                       <MapPin className="w-3.5 h-3.5 text-blue-300" />
@@ -196,6 +241,16 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
                     </span>
                     <span className="text-ink font-bold text-xs">{selectedProject.location}</span>
                   </div>
+
+                  {selectedProject.clientName && (
+                    <div className="flex items-center justify-between py-2 border-b border-grey-200">
+                      <span className="text-grey-600 text-xs flex items-center gap-2">
+                        <User className="w-4 h-4 text-blue-700" />
+                        <span>Client</span>
+                      </span>
+                      <span className="text-ink font-bold text-xs">{selectedProject.clientName}</span>
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-between py-2 border-b border-grey-200">
                     <span className="text-grey-600 text-xs flex items-center gap-2">
@@ -365,8 +420,8 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
                       
                       <div>
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-display font-bold tracking-wide text-blue-700 uppercase bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
-                            Key Metrics
+                          <span className="text-xs font-display font-bold tracking-wide text-blue-700 uppercase bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100 truncate max-w-[170px]">
+                            {p.tags && p.tags.length > 0 ? p.tags.slice(0, 2).join(' • ') : 'Turnkey Project'}
                           </span>
                           <span className="text-xs font-display font-medium text-grey-500">{p.completionDate}</span>
                         </div>
@@ -384,10 +439,12 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
                         </div>
 
                         <div className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4 text-blue-700 flex-shrink-0" />
-                          <div>
-                            <div className="text-[10px] text-grey-500 uppercase font-semibold">Handover</div>
-                            <div className="font-bold text-ink text-xs">{p.completionDate}</div>
+                          <User className="w-4 h-4 text-blue-700 flex-shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[10px] text-grey-500 uppercase font-semibold">Client</div>
+                            <div className="font-bold text-ink text-xs truncate" title={p.clientName || 'Private Client'}>
+                              {p.clientName || 'Private Client'}
+                            </div>
                           </div>
                         </div>
                         
