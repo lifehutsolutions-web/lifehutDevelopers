@@ -327,9 +327,9 @@ export const HomePage: React.FC<HomePageProps> = ({
 
           {/* Signature graphic: blueprint that draws itself into a house */}
           <div className="relative">
-            <div className="relative mx-auto max-w-md aspect-[4/5] rounded-3xl bg-white border border-grey-200 shadow-card overflow-hidden">
+            <div className="relative mx-auto max-w-md aspect-[4/4.2] rounded-3xl bg-white border border-grey-200 shadow-card overflow-hidden">
               <div className="absolute inset-0 blueprint-grid opacity-70" aria-hidden="true" />
-              <svg viewBox="0 0 400 500" className="absolute inset-0 w-full h-full" role="img" aria-label="Line illustration of a house being built from a blueprint">
+              <svg viewBox="0 150 400 430" className="absolute inset-0 w-full h-full" role="img" aria-label="Line illustration of a house being built from a blueprint">
                 <g fill="none" stroke="#14539B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path className="draw-path" d="M70 320 L70 460 L330 460 L330 320" />
                   <path className="draw-path delay1" d="M50 330 L200 210 L350 330" />
@@ -716,9 +716,15 @@ export const HomePage: React.FC<HomePageProps> = ({
                     <span className="text-white text-[10px] font-bold uppercase tracking-wider bg-black/50 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/20">
                       {proj.bedrooms ? `${proj.bedrooms} BHK` : 'Villa'} {proj.floors ? `· ${proj.floors} Floors` : ''}
                     </span>
-                    <span className="text-amber-950 text-[10px] font-extrabold uppercase tracking-wider bg-amber-400 backdrop-blur-md px-2 py-0.5 rounded-full shadow-sm">
-                      Recent Project
-                    </span>
+                    {proj.status === 'Ongoing' ? (
+                      <span className="text-amber-950 text-[10px] font-extrabold uppercase tracking-wider bg-amber-400 backdrop-blur-md px-2 py-0.5 rounded-full shadow-sm flex items-center gap-1">
+                        🟡 On-going
+                      </span>
+                    ) : (
+                      <span className="text-amber-950 text-[10px] font-extrabold uppercase tracking-wider bg-amber-400 backdrop-blur-md px-2 py-0.5 rounded-full shadow-sm">
+                        Recent Project
+                      </span>
+                    )}
                   </div>
 
                   {/* Bottom Overlay Location & Budget */}
@@ -747,7 +753,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                     <p className="text-xs text-grey-600 mt-1.5 flex items-center gap-2">
                       <span>{proj.builtUpArea || 'Turnkey Villa'}</span>
                       <span>·</span>
-                      <span>{proj.completionDate ? `Completed ${proj.completionDate}` : 'Handed over'}</span>
+                      <span>{proj.status === 'Ongoing' ? (proj.completionDate ? `Target ${proj.completionDate}` : 'In Progress') : (proj.completionDate ? `Completed ${proj.completionDate}` : 'Handed over')}</span>
                     </p>
                   </div>
                 </figcaption>

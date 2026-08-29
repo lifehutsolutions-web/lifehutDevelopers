@@ -87,7 +87,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     heroImage: '',
     clientName: '',
     clientTestimonial: '',
-    isRecent: false
+    isRecent: false,
+    isOngoing: false
   });
 
   // Form states for Blog CRUD
@@ -153,7 +154,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     // Default admin credentials
-    if (username === 'admin' && password === 'lifehut2026') {
+    if (username === 'LIFEDVP_2023' && password === 'Lifehut@123') {
       onLogin();
       setLoginError('');
     } else {
@@ -358,7 +359,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       clientName: '',
       clientTestimonial: '',
       clientAvatar: '',
-      status: 'Completed',
+      status: projectForm.isOngoing ? 'Ongoing' : 'Completed',
       gallery: [projectForm.heroImage],
       isRecent: Boolean(projectForm.isRecent)
     };
@@ -637,7 +638,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       heroImage: proj.heroImage,
       clientName: '',
       clientTestimonial: '',
-      isRecent: Boolean(proj.isRecent)
+      isRecent: Boolean(proj.isRecent),
+      isOngoing: proj.status === 'Ongoing'
     });
   };
 
@@ -695,7 +697,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 placeholder="Admin password..."
                 className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#1A6DB5] text-white"
               />
-              <span className="text-[10px] text-slate-400 mt-1">Tip: Use username <span className="font-bold text-white">admin</span> and password <span className="font-bold text-white">lifehut2026</span></span>
+              
             </div>
 
             <button
@@ -870,7 +872,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     bedrooms: 3, floors: 2, budget: '85 Lakhs',
                     heroImage: '',
                     clientName: '', clientTestimonial: '',
-                    isRecent: true
+                    isRecent: true,
+                    isOngoing: false
                   });
                 }}
                 className="px-4 py-2 bg-[#1A6DB5] hover:bg-[#1558a0] text-white text-xs font-bold rounded-xl flex items-center gap-1"
@@ -893,8 +896,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       )}
                     </div>
                     <div className="overflow-hidden">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <div className="font-bold text-xs sm:text-sm text-[#1A2332] truncate">{proj.name}</div>
+                        {proj.status === 'Ongoing' ? (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200 flex-shrink-0">
+                            On-going
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex-shrink-0">
+                            Completed
+                          </span>
+                        )}
                         {proj.isRecent && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200 flex-shrink-0">
                             Home Recent
@@ -1687,15 +1699,28 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-slate-700">Turnkey Budget / Pricing</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. ₹85 Lakhs"
-                      value={projectForm.budget}
-                      onChange={(e) => setProjectForm({ ...projectForm, budget: e.target.value })}
-                      className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-slate-700">Turnkey Budget / Pricing</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. ₹85 Lakhs"
+                        value={projectForm.budget}
+                        onChange={(e) => setProjectForm({ ...projectForm, budget: e.target.value })}
+                        className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
+                      />
+                    </div>
+                    <div className="flex items-center h-[41px] px-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                      <label className="flex items-center gap-2.5 cursor-pointer select-none text-xs font-semibold text-slate-700 w-full">
+                        <input
+                          type="checkbox"
+                          checked={projectForm.isOngoing}
+                          onChange={(e) => setProjectForm({ ...projectForm, isOngoing: e.target.checked })}
+                          className="w-4 h-4 rounded border-slate-300 text-[#1A6DB5] focus:ring-0 cursor-pointer accent-[#1A6DB5]"
+                        />
+                        <span>On-going Project</span>
+                      </label>
+                    </div>
                   </div>
 
                   {/* Hero Presentation Image Upload / Management */}
@@ -1866,6 +1891,8 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                       </div>
                     )}
                   </div>
+
+
 
                   {/* Selection Badge Tool for Home Recent Projects */}
                   <div className="bg-gradient-to-r from-amber-50/90 to-sky-50/80 border border-amber-200/80 rounded-2xl p-4 flex items-center justify-between">

@@ -123,8 +123,12 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
 
                 <div className="absolute bottom-6 left-6 right-6 text-white z-10 flex items-end justify-between">
                   <div>
-                    <span className="text-xs font-display font-bold tracking-wide text-blue-700 uppercase bg-white/95 backdrop-blur-md px-3 py-1 rounded-full border border-grey-200 shadow-soft">
-                      Verified Completed Turnkey
+                    <span className={`text-xs font-display font-bold tracking-wide uppercase backdrop-blur-md px-3 py-1 rounded-full border shadow-soft ${
+                      selectedProject.status === 'Ongoing'
+                        ? 'bg-amber-500 text-slate-950 border-amber-300 font-extrabold'
+                        : 'text-blue-700 bg-white/95 border-grey-200'
+                    }`}>
+                      {selectedProject.status === 'Ongoing' ? 'On-going Construction' : 'Verified Completed Turnkey'}
                     </span>
                     <h1 className="font-display text-2xl sm:text-3xl lg:text-4xl font-extrabold mt-3 text-white tracking-tight">{selectedProject.name}</h1>
                     <div className="flex items-center gap-1.5 text-xs text-grey-200 mt-1">
@@ -175,8 +179,12 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
                   <h3 className="font-display font-extrabold text-base text-ink">
                     Project Specifications
                   </h3>
-                  <span className="px-3 py-1 rounded-full text-xs font-display font-bold bg-blue-50 text-blue-700 border border-blue-100">
-                    Delivered
+                  <span className={`px-3 py-1 rounded-full text-xs font-display font-bold border ${
+                    selectedProject.status === 'Ongoing'
+                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                      : 'bg-blue-50 text-blue-700 border-blue-100'
+                  }`}>
+                    {selectedProject.status === 'Ongoing' ? 'Active Site Work' : 'Delivered'}
                   </span>
                 </div>
                 
@@ -338,8 +346,12 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
 
                     {/* Always-visible Title Banner */}
                     <div className="absolute bottom-5 left-5 right-5 text-white group-hover:opacity-0 transition-opacity duration-200 z-10">
-                      <span className="text-xs font-display font-semibold tracking-wide text-blue-300 uppercase bg-black/60 border border-white/10 px-2.5 py-0.5 rounded-full">
-                        Completed Handover
+                      <span className={`text-xs font-display font-semibold tracking-wide uppercase px-2.5 py-0.5 rounded-full border ${
+                        p.status === 'Ongoing'
+                          ? 'text-amber-300 bg-amber-950/80 border-amber-500/40 font-bold'
+                          : 'text-blue-300 bg-black/60 border-white/10'
+                      }`}>
+                        {p.status === 'Ongoing' ? 'On-going Construction' : 'Completed Handover'}
                       </span>
                       <h3 className="font-display text-lg font-extrabold mt-2 text-white">{p.name}</h3>
                       <div className="text-xs text-grey-300 mt-1 flex items-center gap-1.5">
