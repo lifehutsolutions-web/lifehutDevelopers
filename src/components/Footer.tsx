@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Mail, Phone, MapPin, Instagram, Facebook, MessageSquare, ArrowUp, Youtube } from 'lucide-react';
+import faviconImg from '../assets/images/favicon.png';
 
 interface FooterProps {
   setActiveTab: (tab: string) => void;
@@ -71,11 +72,14 @@ export const Footer: React.FC<FooterProps> = ({
             >
               <div className="relative w-15 h-15 rounded-xl overflow-hidden flex items-center justify-center text-white shadow-soft transition-colors flex-shrink-0">
                 <img
-                  src="/src/assets/images/favicon.png"
+                  src={faviconImg}
                   alt="Lifehut Developers"
                   className="w-full h-full object-contain p-0.5 z-10 bg-transparent"
                   onError={(e) => {
-                    e.currentTarget.style.display = 'none';
+                    const target = e.currentTarget;
+                    if (target.src !== '/favicon.png') {
+                      target.src = '/favicon.png';
+                    }
                   }}        
                 />
               </div>

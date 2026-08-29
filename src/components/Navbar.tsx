@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Menu, X, ArrowRight, UserCheck, ShieldAlert, Phone, Clock, MapPin } from 'lucide-react';
+import logoImg from '../assets/images/logo.png';
 
 interface NavbarProps {
   activeTab: string;
@@ -180,14 +181,21 @@ export const Navbar: React.FC<NavbarProps> = ({
           className="flex items-center gap-3 focus:outline-none cursor-pointer group"
           aria-label="Lifehut Developers Home"
         >
-          <span className="grid place-items-center w-10 h-10 rounded-xl bg-blue-700 text-white shadow-soft group-hover:bg-blue-900 transition-colors" aria-hidden="true">
-            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
-              <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-9.5Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-            </svg>
-          </span>
-          <span className="font-display font-extrabold text-xl sm:text-2xl tracking-tight text-ink">
-            Lifehut<span className="text-blue-700"> Developers</span>
-          </span>
+          <div className="relative w-50 h-50 rounded-xl overflow-hidden flex items-center justify-center text-white shadow-soft transition-colors flex-shrink-0">
+            <img
+              src={logoImg}
+              alt="Lifehut Developers"
+              className="w-full h-full object-contain p-0.5 z-10 bg-transparent"
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (target.src !== '/logo.png') {
+                  target.src = '/logo.png';
+                }
+              }}
+            />
+            
+          </div>
+         
         </button>
 
         {/* Desktop Navigation Links */}

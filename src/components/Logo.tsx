@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import logoImg from '../assets/images/logo.png';
 
 interface LogoProps {
   className?: string;
@@ -16,9 +17,9 @@ export const Logo: React.FC<LogoProps> = ({ className = "h-12", light = false })
 
   // Paths where the user can save/upload their logo file
   const logoPaths = [
-    "/src/assets/images/logo.png",
+    logoImg,
     "/logo.png",
-    "/src/assets/images/logo.svg"
+    "/favicon.png"
   ];
 
   const handleImageError = () => {
