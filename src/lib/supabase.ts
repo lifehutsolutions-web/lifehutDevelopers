@@ -116,6 +116,36 @@ export async function deleteSupabaseService(id: string): Promise<boolean> {
   return !error;
 }
 
+// Local helper to track project tags & attributes if Supabase table lacks columns
+const PROJECT_METADATA_KEY = 'lifehut_project_metadata_map';
+
+interface ProjectMetadataLocal {
+  tags?: string[];
+  clientName?: string;
+  clientAvatar?: string;
+  clientTestimonial?: string;
+}
+
+function getLocalProjectMetadataMap(): Record<string, ProjectMetadataLocal> {
+  try {
+    const raw = localStorage.getItem(PROJECT_METADATA_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function updateLocalProjectMetadata(id: string, meta: ProjectMetadataLocal) {
+  try {
+    const map = getLocalProjectMetadataMap();
+    map[id] = { ...(map[id] || {}), ...meta };
+    localStorage.setItem(PROJECT_METADATA_KEY, JSON.stringify(map));
+  } catch (e) {
+    console.error('Failed to update local project metadata', e);
+  }
+}
+
 // Local helper to track recent project IDs if Supabase table lacks column
 const RECENT_PROJECTS_KEY = 'lifehut_recent_project_ids';
 
@@ -143,6 +173,30 @@ function updateLocalRecentId(id: string, isRecent: boolean) {
   }
 }
 
+// Helper to reliably normalize tags from any Supabase format (JSON array, string, comma separated, or local metadata)
+function parseProjectTags(rawTags: any, fallbackTags?: string[]): string[] {
+  if (Array.isArray(rawTags) && rawTags.length > 0) {
+    return rawTags.map(t => String(t).trim()).filter(Boolean);
+  }
+  if (typeof rawTags === 'string' && rawTags.trim()) {
+    try {
+      const parsed = JSON.parse(rawTags);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map(t => String(t).trim()).filter(Boolean);
+      }
+    } catch {
+      if (rawTags.includes(',')) {
+        return rawTags.split(',').map(t => t.trim()).filter(Boolean);
+      }
+      return [rawTags.trim()];
+    }
+  }
+  if (Array.isArray(fallbackTags) && fallbackTags.length > 0) {
+    return fallbackTags.map(t => String(t).trim()).filter(Boolean);
+  }
+  return [];
+}
+
 // --- PROJECTS DB HELPERS ---
 export async function fetchSupabaseProjects(): Promise<Project[] | null> {
   if (!supabase) return null;
@@ -152,9 +206,18 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
     return null;
   }
   const localRecentSet = getLocalRecentIds();
+  const localMetaMap = getLocalProjectMetadataMap();
+
   return data.map(item => {
     const isRecentFromDb = item.is_recent ?? item.isRecent;
     const isRecent = isRecentFromDb !== undefined ? Boolean(isRecentFromDb) : localRecentSet.has(item.id);
+    const localMeta = localMetaMap[item.id] || {};
+
+    const tags = parseProjectTags(item.tags || item.tag, localMeta.tags);
+    const clientName = item.client_name || item.clientName || localMeta.clientName || '';
+    const clientTestimonial = item.client_testimonial || item.clientTestimonial || localMeta.clientTestimonial || '';
+    const clientAvatar = item.client_avatar || item.clientAvatar || localMeta.clientAvatar || (clientName ? clientName.split(' ').map((s: string) => s[0]).join('').slice(0, 2).toUpperCase() : '');
+
     return {
       id: item.id,
       name: item.name,
@@ -167,10 +230,11 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
       bedrooms: Number(item.bedrooms || 1),
       budget: item.budget || '',
       location: item.location || '',
-      clientTestimonial: item.client_testimonial || item.clientTestimonial || '',
-      clientName: item.client_name || item.clientName || '',
-      clientAvatar: item.client_avatar || item.clientAvatar || '',
+      clientTestimonial,
+      clientName,
+      clientAvatar,
       status: item.status || 'Completed',
+      tags: tags.length > 0 ? tags : ['Independent Villa'],
       isRecent
     };
   });
@@ -181,8 +245,14 @@ export async function saveSupabaseProject(project: Project): Promise<boolean> {
 
   // Persist locally as fallback in case remote table hasn't added column yet
   updateLocalRecentId(project.id, Boolean(project.isRecent));
+  updateLocalProjectMetadata(project.id, {
+    tags: project.tags || [],
+    clientName: project.clientName || '',
+    clientAvatar: project.clientAvatar || '',
+    clientTestimonial: project.clientTestimonial || ''
+  });
 
-  const payload: Record<string, any> = {
+  const basePayload: Record<string, any> = {
     id: project.id,
     name: project.name,
     hero_image: project.heroImage,
@@ -198,16 +268,40 @@ export async function saveSupabaseProject(project: Project): Promise<boolean> {
     client_name: project.clientName,
     client_avatar: project.clientAvatar,
     status: project.status,
+  };
+
+  const payload: Record<string, any> = {
+    ...basePayload,
+    tags: project.tags || [],
     is_recent: Boolean(project.isRecent)
   };
 
   let { error } = await supabase.from('projects').upsert(payload);
 
-  // If column 'is_recent' does not exist in user's Supabase schema (PGRST204), retry gracefully without it
-  if (error && (error.code === 'PGRST204' || error.message?.includes('is_recent'))) {
-    console.warn('Supabase projects table lacks is_recent column, saving project with fallback:', error.message);
-    delete payload.is_recent;
-    const retry = await supabase.from('projects').upsert(payload);
+  // Progressive resilient retry if any optional/new columns do not exist in user's database (PGRST204)
+  if (error && error.code === 'PGRST204') {
+    const errorMsg = (error.message || '').toLowerCase();
+    console.warn('Supabase projects table schema difference detected (PGRST204):', error.message);
+
+    // Iterative removal of problematic columns
+    const fallbackPayload = { ...payload };
+    if (errorMsg.includes('tags')) delete fallbackPayload.tags;
+    if (errorMsg.includes('is_recent')) delete fallbackPayload.is_recent;
+    if (errorMsg.includes('client_name')) delete fallbackPayload.client_name;
+    if (errorMsg.includes('client_avatar')) delete fallbackPayload.client_avatar;
+    if (errorMsg.includes('client_testimonial')) delete fallbackPayload.client_testimonial;
+
+    let retry = await supabase.from('projects').upsert(fallbackPayload);
+    
+    // If it still fails with PGRST204 on another optional column, strip all newly added optional columns
+    if (retry.error && retry.error.code === 'PGRST204') {
+      const minimalPayload = { ...basePayload };
+      delete minimalPayload.client_name;
+      delete minimalPayload.client_avatar;
+      delete minimalPayload.client_testimonial;
+      retry = await supabase.from('projects').upsert(minimalPayload);
+    }
+
     if (!retry.error) {
       error = null;
     } else {
@@ -341,6 +435,7 @@ export async function fetchSupabaseSettings(): Promise<Settings | null> {
     facebookUrl: data.facebook_url || '',
     instagramUrl: data.instagram_url || '',
     pinterestUrl: data.pinterest_url || '',
+    youtubeUrl: data.youtube_url || '',
     linkedinUrl: data.linkedin_url || '',
     seoTitle: data.seo_title || '',
     seoDescription: data.seo_description || '',
@@ -369,6 +464,7 @@ export async function saveSupabaseSettings(settings: Settings): Promise<boolean>
     facebook_url: settings.facebookUrl,
     instagram_url: settings.instagramUrl,
     pinterest_url: settings.pinterestUrl,
+    youtube_url: settings.youtubeUrl,
     linkedin_url: settings.linkedinUrl,
     seo_title: settings.seoTitle,
     seo_description: settings.seoDescription,

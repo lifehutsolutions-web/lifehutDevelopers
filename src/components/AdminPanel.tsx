@@ -5,7 +5,7 @@ import {
   ShieldAlert, LogIn, Plus, Trash2, Edit, Save, Check, RefreshCw,
   Database, Upload, Copy, ExternalLink, CheckCircle2, Globe,
   Sparkles, Star, Image as ImageIcon, Loader2, X, Link2, AlertCircle,
-  MapPin, Calendar, Home
+  MapPin, Calendar, Home, User, Tag
 } from 'lucide-react';
 import {
   isSupabaseConfigured,
@@ -29,6 +29,14 @@ interface AdminPanelProps {
   refreshAllData: () => void;
   isStaticMode?: boolean;
 }
+
+const AVAILABLE_PROJECT_TAGS = [
+  'Independent Villa',
+  'Apartments',
+  'Commercial',
+  'Industrial',
+  'Infra'
+];
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   isAdminLoggedIn,
@@ -87,6 +95,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     heroImage: '',
     clientName: '',
     clientTestimonial: '',
+    tags: ['Independent Villa'] as string[],
     isRecent: false,
     isOngoing: false
   });
@@ -111,6 +120,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     whatsappNumber: '',
     instagramUrl: '',
     pinterestUrl: '',
+    youtubeUrl: '',
     facebookUrl: '',
     linkedinUrl: '',
     seoTitle: '',
@@ -137,6 +147,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         whatsappNumber: settings.whatsappNumber || '918072163330',
         instagramUrl: settings.instagramUrl || '',
         pinterestUrl: settings.pinterestUrl || '',
+        youtubeUrl: settings.youtubeUrl || '',
         facebookUrl: settings.facebookUrl || '',
         linkedinUrl: settings.linkedinUrl || '',
         seoTitle: settings.seoTitle || 'Top Residential Building Construction Company in Chennai | Lifehut Developers',
@@ -356,9 +367,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       floors: projectForm.floors,
       budget: projectForm.budget,
       heroImage: projectForm.heroImage || 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=800&auto=format&fit=crop',
-      clientName: '',
-      clientTestimonial: '',
-      clientAvatar: '',
+      clientName: projectForm.clientName || '',
+      clientTestimonial: projectForm.clientTestimonial || '',
+      clientAvatar: projectForm.clientName ? projectForm.clientName.split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase() : 'LH',
+      tags: projectForm.tags || [],
       status: projectForm.isOngoing ? 'Ongoing' : 'Completed',
       gallery: [projectForm.heroImage],
       isRecent: Boolean(projectForm.isRecent)
@@ -366,6 +378,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     if (isSupabaseConfigured()) {
       await saveSupabaseProject(projectObj);
+      // Also update local storage cache so offline / fast load is 100% consistent
+      const key = 'lifehut_local_projects';
+      try {
+        const items = JSON.parse(localStorage.getItem(key) || '[]');
+        const idx = items.findIndex((i: any) => i.id === projectObj.id);
+        if (idx !== -1) {
+          items[idx] = { ...items[idx], ...projectObj };
+        } else {
+          items.unshift(projectObj);
+        }
+        localStorage.setItem(key, JSON.stringify(items));
+      } catch (err) {}
       setEditingItemType(null);
       setEditingItemId(null);
       refreshAllData();
@@ -497,6 +521,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       facebookUrl: settingsForm.facebookUrl || "",
       instagramUrl: settingsForm.instagramUrl || "",
       pinterestUrl: settingsForm.pinterestUrl || "",
+      youtubeUrl: settingsForm.youtubeUrl || "",
       linkedinUrl: settingsForm.linkedinUrl || "",
       seoTitle: settingsForm.seoTitle || "Top Residential Building Construction Company in Chennai | Lifehut Developers",
       seoDescription: settingsForm.seoDescription || "Leading residential building construction company in Chennai.",
@@ -636,8 +661,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       floors: proj.floors || 2,
       budget: proj.budget || '',
       heroImage: proj.heroImage,
-      clientName: '',
-      clientTestimonial: '',
+      clientName: proj.clientName || '',
+      clientTestimonial: proj.clientTestimonial || '',
+      tags: proj.tags && proj.tags.length > 0 ? proj.tags : ['Independent Villa'],
       isRecent: Boolean(proj.isRecent),
       isOngoing: proj.status === 'Ongoing'
     });
@@ -872,6 +898,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     bedrooms: 3, floors: 2, budget: '85 Lakhs',
                     heroImage: '',
                     clientName: '', clientTestimonial: '',
+                    tags: ['Independent Villa'],
                     isRecent: true,
                     isOngoing: false
                   });
@@ -912,8 +939,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             Home Recent
                           </span>
                         )}
+                        {proj.tags && proj.tags.map((t) => (
+                          <span key={t} className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-blue-50 text-[#1A6DB5] border border-blue-100 flex-shrink-0">
+                            {t}
+                          </span>
+                        ))}
                       </div>
-                      <div className="text-[10px] text-slate-400 truncate mt-0.5">{proj.location}</div>
+                      <div className="text-[10px] text-slate-400 truncate mt-0.5 flex items-center gap-2">
+                        <span>{proj.location}</span>
+                        {proj.clientName && (
+                          <span>• Client: <strong className="text-slate-600 font-semibold">{proj.clientName}</strong></span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -1212,7 +1249,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     type="text"
                     value={settingsForm.instagramUrl}
                     onChange={(e) => setSettingsForm({ ...settingsForm, instagramUrl: e.target.value })}
-                    placeholder="https://instagram.com/lifehutdevelopers"
+                    placeholder="https://instagram.com/lifehut_developers"
+                    className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-bold text-slate-600">YouTube Channel URL</label>
+                  <input
+                    type="text"
+                    value={settingsForm.youtubeUrl}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, youtubeUrl: e.target.value })}
+                    placeholder="https://youtube.com/@lifehutdevelopers"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
                   />
                 </div>
@@ -1223,7 +1271,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     type="text"
                     value={settingsForm.pinterestUrl}
                     onChange={(e) => setSettingsForm({ ...settingsForm, pinterestUrl: e.target.value })}
-                    placeholder="https://pinterest.com/lifehutdevelopers"
+                    placeholder="https://in.pinterest.com/lifehutdevelopers"
+                    className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-bold text-slate-600">Facebook Page URL</label>
+                  <input
+                    type="text"
+                    value={settingsForm.facebookUrl}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, facebookUrl: e.target.value })}
+                    placeholder="https://facebook.com/lifehutdevelopers"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
                   />
                 </div>
@@ -1394,11 +1453,13 @@ CREATE TABLE IF NOT EXISTS public.projects (
     client_name TEXT,
     client_avatar TEXT,
     status TEXT DEFAULT 'Completed',
+    tags JSONB DEFAULT '[]'::jsonb,
     is_recent BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Ensure is_recent exists on existing tables
+-- Ensure optional columns exist on existing tables
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS is_recent BOOLEAN DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS public.enquiries (
@@ -1442,6 +1503,7 @@ CREATE TABLE IF NOT EXISTS public.settings (
     facebook_url TEXT,
     instagram_url TEXT,
     pinterest_url TEXT,
+    youtube_url TEXT,
     linkedin_url TEXT,
     seo_title TEXT,
     seo_description TEXT,
@@ -1616,16 +1678,75 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
               {/* 2. Project Form */}
               {editingItemType === 'project' && (
                 <form onSubmit={handleSaveProject} className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-slate-700">Project Name</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Modern 4BHK Luxury Villa"
-                      value={projectForm.name}
-                      onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })}
-                      className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-slate-700">Project Name</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Modern 4BHK Luxury Villa"
+                        value={projectForm.name}
+                        onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })}
+                        className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5 text-[#1A6DB5]" />
+                        <span>Client Name</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Mr. Mohanraj / Dr. Senthil"
+                        value={projectForm.clientName}
+                        onChange={(e) => setProjectForm({ ...projectForm, clientName: e.target.value })}
+                        className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Tag Selection Checkboxes */}
+                  <div className="flex flex-col gap-2 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5 text-[#1A6DB5]" />
+                        <span>Tag Selection (Project Type)</span>
+                      </label>
+                      <span className="text-[10px] font-semibold text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200">
+                        {projectForm.tags.length} selected
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Select required categories that apply to this project:
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mt-1">
+                      {AVAILABLE_PROJECT_TAGS.map((tag) => {
+                        const isChecked = projectForm.tags.includes(tag);
+                        return (
+                          <label
+                            key={tag}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold cursor-pointer transition-all select-none ${
+                              isChecked
+                                ? 'bg-blue-50 border-[#1A6DB5] text-[#1A6DB5] shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                const newTags = e.target.checked
+                                  ? [...projectForm.tags, tag]
+                                  : projectForm.tags.filter((t) => t !== tag);
+                                setProjectForm({ ...projectForm, tags: newTags });
+                              }}
+                              className="w-4 h-4 rounded border-slate-300 text-[#1A6DB5] focus:ring-0 cursor-pointer accent-[#1A6DB5]"
+                            />
+                            <span className="truncate">{tag}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
