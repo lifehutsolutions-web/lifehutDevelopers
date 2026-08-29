@@ -25,6 +25,7 @@ export interface Project {
   clientAvatar?: string;
   status: 'Completed' | 'Ongoing';
   isRecent?: boolean;
+  tags?: string[];
 }
 
 export interface Blog {
@@ -109,6 +110,7 @@ export interface SiteSettings {
   facebookUrl?: string;
   instagramUrl?: string;
   pinterestUrl?: string;
+  youtubeUrl?: string;
   linkedinUrl?: string;
   seoTitle: string;
   seoDescription: string;
