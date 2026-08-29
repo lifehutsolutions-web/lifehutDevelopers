@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Service, Project, Enquiry, QuoteRequest, Settings, Testimonial } from '../types';
+import { defaultProjects } from '../data/defaults';
 
 // Environment variables for Cloudflare / Vite
 const env = ((import.meta as unknown as { env?: Record<string, string> }).env) || {};
@@ -116,17 +117,19 @@ export async function deleteSupabaseService(id: string): Promise<boolean> {
   return !error;
 }
 
-// Local helper to track project tags & attributes if Supabase table lacks columns
+// --- AUTOMATIC METADATA PERSISTENCE IN SUPABASE ---
+// Tracks project tags, client details, and featured status seamlessly across deploys
 const PROJECT_METADATA_KEY = 'lifehut_project_metadata_map';
 
-interface ProjectMetadataLocal {
+interface ProjectMetadataItem {
   tags?: string[];
   clientName?: string;
   clientAvatar?: string;
   clientTestimonial?: string;
+  isRecent?: boolean;
 }
 
-function getLocalProjectMetadataMap(): Record<string, ProjectMetadataLocal> {
+function getLocalProjectMetadataMap(): Record<string, ProjectMetadataItem> {
   try {
     const raw = localStorage.getItem(PROJECT_METADATA_KEY);
     if (!raw) return {};
@@ -136,7 +139,7 @@ function getLocalProjectMetadataMap(): Record<string, ProjectMetadataLocal> {
   }
 }
 
-function updateLocalProjectMetadata(id: string, meta: ProjectMetadataLocal) {
+function updateLocalProjectMetadata(id: string, meta: ProjectMetadataItem) {
   try {
     const map = getLocalProjectMetadataMap();
     map[id] = { ...(map[id] || {}), ...meta };
@@ -146,35 +149,55 @@ function updateLocalProjectMetadata(id: string, meta: ProjectMetadataLocal) {
   }
 }
 
-// Local helper to track recent project IDs if Supabase table lacks column
-const RECENT_PROJECTS_KEY = 'lifehut_recent_project_ids';
-
-function getLocalRecentIds(): Set<string> {
+// Save project tags and metadata into Supabase settings table so it persists across all devices & deploys
+async function persistProjectMetaToSupabase(id: string, meta: ProjectMetadataItem) {
+  if (!supabase) return;
   try {
-    const raw = localStorage.getItem(RECENT_PROJECTS_KEY);
-    if (!raw) return new Set();
-    return new Set(JSON.parse(raw));
-  } catch {
-    return new Set();
-  }
-}
-
-function updateLocalRecentId(id: string, isRecent: boolean) {
-  try {
-    const set = getLocalRecentIds();
-    if (isRecent) {
-      set.add(id);
-    } else {
-      set.delete(id);
+    let { data } = await supabase.from('settings').select('stats').limit(1);
+    let table = 'settings';
+    if (!data || data.length === 0) {
+      const res = await supabase.from('site_settings').select('stats').limit(1);
+      data = res.data;
+      table = 'site_settings';
     }
-    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(Array.from(set)));
-  } catch (e) {
-    console.error('Failed to update local recent project ids', e);
+
+    const currentStats = (data && data[0] && typeof data[0].stats === 'object') ? data[0].stats : {};
+    const metaMap = currentStats.project_metadata_map || {};
+    metaMap[id] = { ...(metaMap[id] || {}), ...meta };
+
+    await supabase.from(table).upsert({
+      id: 'site_settings',
+      stats: {
+        ...currentStats,
+        project_metadata_map: metaMap
+      },
+      updated_at: new Date().toISOString()
+    });
+  } catch (err) {
+    console.warn('Auto meta persistence to Supabase settings:', err);
   }
 }
 
-// Helper to reliably normalize tags from any Supabase format (JSON array, string, comma separated, or local metadata)
-function parseProjectTags(rawTags: any, fallbackTags?: string[]): string[] {
+// Fetch remote project metadata map stored in Supabase settings
+async function fetchProjectMetaFromSupabase(): Promise<Record<string, ProjectMetadataItem>> {
+  if (!supabase) return {};
+  try {
+    let { data } = await supabase.from('settings').select('stats').limit(1);
+    if (!data || data.length === 0) {
+      const res = await supabase.from('site_settings').select('stats').limit(1);
+      data = res.data;
+    }
+    if (data && data[0]?.stats?.project_metadata_map) {
+      return data[0].stats.project_metadata_map;
+    }
+  } catch {
+    // Ignore fetch error
+  }
+  return {};
+}
+
+// Helper to reliably normalize tags from any format
+function parseProjectTags(rawTags: any, fallbackTags?: string[], projectName?: string): string[] {
   if (Array.isArray(rawTags) && rawTags.length > 0) {
     return rawTags.map(t => String(t).trim()).filter(Boolean);
   }
@@ -194,7 +217,26 @@ function parseProjectTags(rawTags: any, fallbackTags?: string[]): string[] {
   if (Array.isArray(fallbackTags) && fallbackTags.length > 0) {
     return fallbackTags.map(t => String(t).trim()).filter(Boolean);
   }
-  return [];
+
+  // Intelligent tag deduction fallback if tags column hasn't been added to Supabase yet
+  const nameLower = (projectName || '').toLowerCase();
+  const inferred: string[] = [];
+  if (nameLower.includes('villa') || nameLower.includes('house') || nameLower.includes('residence') || nameLower.includes('home')) {
+    inferred.push('Independent Villa');
+  }
+  if (nameLower.includes('apartment') || nameLower.includes('flat') || nameLower.includes('duplex')) {
+    inferred.push('Apartments');
+  }
+  if (nameLower.includes('commercial') || nameLower.includes('park') || nameLower.includes('office')) {
+    inferred.push('Commercial');
+  }
+  if (nameLower.includes('industrial') || nameLower.includes('hub') || nameLower.includes('warehouse')) {
+    inferred.push('Industrial');
+  }
+  if (nameLower.includes('infra') || nameLower.includes('logistics') || nameLower.includes('civil')) {
+    inferred.push('Infra');
+  }
+  return inferred.length > 0 ? inferred : ['Independent Villa'];
 }
 
 // --- PROJECTS DB HELPERS ---
@@ -205,24 +247,45 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
     console.error('Error fetching projects from Supabase:', error);
     return null;
   }
-  const localRecentSet = getLocalRecentIds();
+
+  // Fetch remote project metadata map from Supabase settings
+  const remoteMetaMap = await fetchProjectMetaFromSupabase();
   const localMetaMap = getLocalProjectMetadataMap();
 
-  return data.map(item => {
-    const isRecentFromDb = item.is_recent ?? item.isRecent;
-    const isRecent = isRecentFromDb !== undefined ? Boolean(isRecentFromDb) : localRecentSet.has(item.id);
-    const localMeta = localMetaMap[item.id] || {};
+  const projectsToAutoBackfill: { id: string; clientName: string; clientTestimonial?: string; clientAvatar?: string }[] = [];
 
-    const tags = parseProjectTags(item.tags || item.tag, localMeta.tags);
-    const clientName = item.client_name || item.clientName || localMeta.clientName || '';
-    const clientTestimonial = item.client_testimonial || item.clientTestimonial || localMeta.clientTestimonial || '';
-    const clientAvatar = item.client_avatar || item.clientAvatar || localMeta.clientAvatar || (clientName ? clientName.split(' ').map((s: string) => s[0]).join('').slice(0, 2).toUpperCase() : '');
+  const projects = data.map(item => {
+    const remoteMeta = remoteMetaMap[item.id] || {};
+    const localMeta = localMetaMap[item.id] || {};
+    const defaultMatch = defaultProjects.find(dp => dp.id === item.id || dp.name.toLowerCase() === (item.name || '').toLowerCase());
+
+    const isRecentFromDb = item.is_recent ?? item.isRecent;
+    const isRecent = isRecentFromDb !== undefined 
+      ? Boolean(isRecentFromDb) 
+      : (remoteMeta.isRecent !== undefined ? Boolean(remoteMeta.isRecent) : (defaultMatch ? Boolean(defaultMatch.isRecent) : true));
+
+    const tags = parseProjectTags(item.tags || item.tag, remoteMeta.tags || localMeta.tags || defaultMatch?.tags, item.name);
+
+    // Resolve clientName with multiple robust fallbacks
+    const clientName = item.client_name || item.clientName || remoteMeta.clientName || localMeta.clientName || defaultMatch?.clientName || '';
+    const clientTestimonial = item.client_testimonial || item.clientTestimonial || remoteMeta.clientTestimonial || localMeta.clientTestimonial || defaultMatch?.clientTestimonial || '';
+    const clientAvatar = item.client_avatar || item.clientAvatar || remoteMeta.clientAvatar || localMeta.clientAvatar || (clientName ? clientName.split(' ').map((s: string) => s[0]).join('').slice(0, 2).toUpperCase() : 'LH');
+
+    // If client_name in Supabase row is empty, schedule silent background update to Supabase
+    if ((!item.client_name || item.client_name.trim() === '') && clientName) {
+      projectsToAutoBackfill.push({
+        id: item.id,
+        clientName,
+        clientTestimonial,
+        clientAvatar
+      });
+    }
 
     return {
       id: item.id,
       name: item.name,
       heroImage: item.hero_image || item.heroImage || '',
-      gallery: Array.isArray(item.gallery) ? item.gallery : [],
+      gallery: Array.isArray(item.gallery) && item.gallery.length > 0 ? item.gallery : (item.hero_image ? [item.hero_image] : []),
       completionDate: item.completion_date || item.completionDate || '',
       plotSize: item.plot_size || item.plotSize || '',
       builtUpArea: item.built_up_area || item.builtUpArea || '',
@@ -234,85 +297,122 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
       clientName,
       clientAvatar,
       status: item.status || 'Completed',
-      tags: tags.length > 0 ? tags : ['Independent Villa'],
+      tags,
       isRecent
     };
   });
+
+  // Auto-backfill any empty client_name fields in Supabase in background
+  if (projectsToAutoBackfill.length > 0) {
+    setTimeout(async () => {
+      for (const p of projectsToAutoBackfill) {
+        try {
+          await supabase.from('projects').update({
+            client_name: p.clientName,
+            client_testimonial: p.clientTestimonial || null,
+            client_avatar: p.clientAvatar || 'LH'
+          }).eq('id', p.id);
+        } catch {
+          // Silent fallback
+        }
+      }
+    }, 100);
+  }
+
+  return projects;
 }
 
 export async function saveSupabaseProject(project: Project): Promise<boolean> {
   if (!supabase) return false;
 
-  // Persist locally as fallback in case remote table hasn't added column yet
-  updateLocalRecentId(project.id, Boolean(project.isRecent));
+  // Persist locally for instant responsiveness
   updateLocalProjectMetadata(project.id, {
     tags: project.tags || [],
     clientName: project.clientName || '',
     clientAvatar: project.clientAvatar || '',
-    clientTestimonial: project.clientTestimonial || ''
+    clientTestimonial: project.clientTestimonial || '',
+    isRecent: Boolean(project.isRecent)
   });
 
-  const basePayload: Record<string, any> = {
+  // Persist metadata to Supabase settings in background so tags persist across deploys
+  persistProjectMetaToSupabase(project.id, {
+    tags: project.tags || [],
+    clientName: project.clientName || '',
+    clientAvatar: project.clientAvatar || '',
+    clientTestimonial: project.clientTestimonial || '',
+    isRecent: Boolean(project.isRecent)
+  });
+
+  const fullPayload: Record<string, any> = {
     id: project.id,
     name: project.name,
     hero_image: project.heroImage,
-    gallery: project.gallery,
+    gallery: Array.isArray(project.gallery) && project.gallery.length > 0 ? project.gallery : [project.heroImage],
     completion_date: project.completionDate,
-    plot_size: project.plotSize,
-    built_up_area: project.builtUpArea,
-    floors: project.floors,
-    bedrooms: project.bedrooms,
-    budget: project.budget,
-    location: project.location,
-    client_testimonial: project.clientTestimonial,
-    client_name: project.clientName,
-    client_avatar: project.clientAvatar,
-    status: project.status,
-  };
-
-  const payload: Record<string, any> = {
-    ...basePayload,
-    tags: project.tags || [],
+    plot_size: project.plotSize || project.builtUpArea || '',
+    built_up_area: project.builtUpArea || project.plotSize || '',
+    floors: Number(project.floors || 1),
+    bedrooms: Number(project.bedrooms || 1),
+    budget: project.budget || '',
+    location: project.location || '',
+    client_name: project.clientName ? project.clientName.trim() : null,
+    client_avatar: project.clientAvatar || (project.clientName ? project.clientName.split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase() : 'LH'),
+    client_testimonial: project.clientTestimonial ? project.clientTestimonial.trim() : null,
+    status: project.status || 'Completed',
+    tags: Array.isArray(project.tags) && project.tags.length > 0 ? project.tags : ['Independent Villa'],
     is_recent: Boolean(project.isRecent)
   };
 
-  let { error } = await supabase.from('projects').upsert(payload);
+  const currentPayload = { ...fullPayload };
+  let attempt = 0;
+  let success = false;
 
-  // Progressive resilient retry if any optional/new columns do not exist in user's database (PGRST204)
-  if (error && error.code === 'PGRST204') {
-    const errorMsg = (error.message || '').toLowerCase();
-    console.warn('Supabase projects table schema difference detected (PGRST204):', error.message);
-
-    // Iterative removal of problematic columns
-    const fallbackPayload = { ...payload };
-    if (errorMsg.includes('tags')) delete fallbackPayload.tags;
-    if (errorMsg.includes('is_recent')) delete fallbackPayload.is_recent;
-    if (errorMsg.includes('client_name')) delete fallbackPayload.client_name;
-    if (errorMsg.includes('client_avatar')) delete fallbackPayload.client_avatar;
-    if (errorMsg.includes('client_testimonial')) delete fallbackPayload.client_testimonial;
-
-    let retry = await supabase.from('projects').upsert(fallbackPayload);
-    
-    // If it still fails with PGRST204 on another optional column, strip all newly added optional columns
-    if (retry.error && retry.error.code === 'PGRST204') {
-      const minimalPayload = { ...basePayload };
-      delete minimalPayload.client_name;
-      delete minimalPayload.client_avatar;
-      delete minimalPayload.client_testimonial;
-      retry = await supabase.from('projects').upsert(minimalPayload);
+  while (attempt < 6) {
+    attempt++;
+    const { error } = await supabase.from('projects').upsert(currentPayload);
+    if (!error) {
+      success = true;
+      break;
     }
 
-    if (!retry.error) {
-      error = null;
+    // Check if error is missing column in PostgREST schema cache (PGRST204)
+    if (error.code === 'PGRST204' || error.message?.includes('schema cache')) {
+      const match = error.message?.match(/Could not find the '([^']+)' column/i);
+      const missingCol = match ? match[1] : null;
+
+      if (missingCol && missingCol in currentPayload) {
+        delete currentPayload[missingCol];
+        continue;
+      }
+
+      if (error.message?.includes('tags') && 'tags' in currentPayload) {
+        delete currentPayload.tags;
+        continue;
+      }
+      if (error.message?.includes('is_recent') && 'is_recent' in currentPayload) {
+        delete currentPayload.is_recent;
+        continue;
+      }
+      if (error.message?.includes('client_avatar') && 'client_avatar' in currentPayload) {
+        delete currentPayload.client_avatar;
+        continue;
+      }
+      if (error.message?.includes('client_testimonial') && 'client_testimonial' in currentPayload) {
+        delete currentPayload.client_testimonial;
+        continue;
+      }
+      if (error.message?.includes('client_name') && 'client_name' in currentPayload) {
+        delete currentPayload.client_name;
+        continue;
+      }
+      break;
     } else {
-      console.error('Error saving project to Supabase after fallback:', retry.error);
-      return false;
+      console.error('Error saving project to Supabase:', error);
+      break;
     }
-  } else if (error) {
-    console.error('Error saving project to Supabase:', error);
-    return false;
   }
-  return true;
+
+  return success;
 }
 
 export async function deleteSupabaseProject(id: string): Promise<boolean> {
