@@ -811,7 +811,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold" aria-hidden="true">A</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Arun Kumar</p>
+                      <p className="font-display font-bold text-ink text-sm">Ismail</p>
                       <p className="text-xs text-grey-600">Ambattur, Chennai</p>
                     </div>
                   </figcaption>
@@ -827,8 +827,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold" aria-hidden="true">P</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Priya Mohan</p>
-                      <p className="text-xs text-grey-600">Anna Nagar, Chennai</p>
+                      <p className="font-display font-bold text-ink text-sm">Vidhyadaran</p>
+                      <p className="text-xs text-grey-600">Thirumullaivoyal, Chennai</p>
                     </div>
                   </figcaption>
                 </figure>
@@ -843,8 +843,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold" aria-hidden="true">S</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Senthil Raj</p>
-                      <p className="text-xs text-grey-600">Coimbatore</p>
+                      <p className="font-display font-bold text-ink text-sm">Gani Iqbal</p>
+                      <p className="text-xs text-grey-600">Puzhal, Chennai</p>
                     </div>
                   </figcaption>
                 </figure>
@@ -859,8 +859,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold" aria-hidden="true">L</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Lakshmi Narayanan</p>
-                      <p className="text-xs text-grey-600">Trichy</p>
+                      <p className="font-display font-bold text-ink text-sm">Navin kumar</p>
+                      <p className="text-xs text-grey-600">Ambattur, Chennai</p>
                     </div>
                   </figcaption>
                 </figure>
@@ -875,8 +875,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold" aria-hidden="true">M</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Meena Sundar</p>
-                      <p className="text-xs text-grey-600">Madurai</p>
+                      <p className="font-display font-bold text-ink text-sm">Sankar</p>
+                      <p className="text-xs text-grey-600">Ambattur, Chennai</p>
                     </div>
                   </figcaption>
                 </figure>
@@ -891,8 +891,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold" aria-hidden="true">K</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Karthik Raja</p>
-                      <p className="text-xs text-grey-600">Velachery, Chennai</p>
+                      <p className="font-display font-bold text-ink text-sm">Amsaveni</p>
+                      <p className="text-xs text-grey-600">Madhavaram, Chennai</p>
                     </div>
                   </figcaption>
                 </figure>
@@ -910,7 +910,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold">A</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Arun Kumar</p>
+                      <p className="font-display font-bold text-ink text-sm">Ismail</p>
                       <p className="text-xs text-grey-600">Ambattur, Chennai</p>
                     </div>
                   </figcaption>
@@ -926,8 +926,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold">P</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Priya Mohan</p>
-                      <p className="text-xs text-grey-600">Anna Nagar, Chennai</p>
+                      <p className="font-display font-bold text-ink text-sm">Vidhayadaran</p>
+                      <p className="text-xs text-grey-600">Thirumullaivoyal, Chennai</p>
                     </div>
                   </figcaption>
                 </figure>
@@ -942,8 +942,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold">S</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Senthil Raj</p>
-                      <p className="text-xs text-grey-600">Coimbatore</p>
+                      <p className="font-display font-bold text-ink text-sm">Gani Iqbal</p>
+                      <p className="text-xs text-grey-600">Puzhal, Chennai</p>
                     </div>
                   </figcaption>
                 </figure>
@@ -958,8 +958,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold">L</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Lakshmi Narayanan</p>
-                      <p className="text-xs text-grey-600">Trichy</p>
+                      <p className="font-display font-bold text-ink text-sm">Navin Kumar</p>
+                      <p className="text-xs text-grey-600">Ambattur, Chennai</p>
                     </div>
                   </figcaption>
                 </figure>
@@ -974,8 +974,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold">M</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Meena Sundar</p>
-                      <p className="text-xs text-grey-600">Madurai</p>
+                      <p className="font-display font-bold text-ink text-sm">Sankarr</p>
+                      <p className="text-xs text-grey-600">Ambattur, Chennai</p>
                     </div>
                   </figcaption>
                 </figure>
@@ -990,8 +990,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <figcaption className="mt-5 flex items-center gap-3">
                     <span className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 grid place-items-center font-display font-bold">K</span>
                     <div>
-                      <p className="font-display font-bold text-ink text-sm">Karthik Raja</p>
-                      <p className="text-xs text-grey-600">Velachery, Chennai</p>
+                      <p className="font-display font-bold text-ink text-sm">Amsaveni</p>
+                      <p className="text-xs text-grey-600">Madhavaram, Chennai</p>
                     </div>
                   </figcaption>
                 </figure>
