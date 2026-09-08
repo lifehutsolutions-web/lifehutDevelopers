@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Service, Project, Blog, Enquiry, Settings } from '../types';
+import { Service, Project, Blog, Enquiry, Settings, HousePlan } from '../types';
+import { AdminHousePlans } from './AdminHousePlans';
 import {
   Users, Briefcase, FileText, Settings as SettingsIcon,
   ShieldAlert, LogIn, Plus, Trash2, Edit, Save, Check, RefreshCw,
@@ -24,6 +25,7 @@ interface AdminPanelProps {
   services: Service[];
   projects: Project[];
   blogs: Blog[];
+  housePlans?: HousePlan[];
   enquiries: Enquiry[];
   settings: Settings | null;
   refreshAllData: () => void;
@@ -44,6 +46,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   services,
   projects,
   blogs,
+  housePlans = [],
   enquiries,
   settings,
   refreshAllData,
@@ -55,8 +58,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [loginError, setLoginError] = useState('');
 
   // Active Admin Sub-tab
-  const [activeSubTab, setActiveSubTab] = useState<'enquiries' | 'projects' | 'blogs' | 'services' | 'settings' | 'database'>('enquiries');
-  const [copiedSql, setCopiedSql] = useState(false);
+  const [activeSubTab, setActiveSubTab] = useState<'enquiries' | 'housePlans' | 'projects' | 'blogs' | 'services' | 'settings'>('enquiries');
   const [uploadingImage, setUploadingImage] = useState(false);
 
   // Project Image Upload States
@@ -129,7 +131,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     projectsDone: '120',
     experienceYears: '7',
     clientSatisfaction: '99',
-    hiddenCharges: '0'
+    hiddenCharges: '0',
+    razorpayKeyId: '',
+    razorpayKeySecret: '',
+    razorpayEnabled: true
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSavedSuccess, setSettingsSavedSuccess] = useState(false);
@@ -156,7 +161,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         projectsDone: settings.stats?.projectsDone || '120',
         experienceYears: settings.stats?.experienceYears || '7',
         clientSatisfaction: settings.stats?.clientSatisfaction || '99',
-        hiddenCharges: settings.stats?.hiddenCharges || '0'
+        hiddenCharges: settings.stats?.hiddenCharges || '0',
+        razorpayKeyId: settings.razorpayKeyId || '',
+        razorpayKeySecret: settings.razorpayKeySecret || '',
+        razorpayEnabled: settings.razorpayEnabled !== undefined ? settings.razorpayEnabled : true
       });
     }
   }, [settings]);
@@ -356,6 +364,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Project Save (Create / Update)
   const handleSaveProject = async (e: React.FormEvent) => {
     e.preventDefault();
+    const existingProj = projects.find(p => p.id === editingItemId);
+    const existingGallery = existingProj?.gallery && existingProj.gallery.length > 0 ? existingProj.gallery : [];
+    const gallery = existingGallery.length > 0 
+      ? (existingGallery.includes(projectForm.heroImage) ? existingGallery : [projectForm.heroImage, ...existingGallery.filter(g => g !== projectForm.heroImage)])
+      : [projectForm.heroImage];
+
     const projectObj: Project = {
       id: editingItemId || projectForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now(),
       name: projectForm.name,
@@ -367,12 +381,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       floors: projectForm.floors,
       budget: projectForm.budget,
       heroImage: projectForm.heroImage || 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=800&auto=format&fit=crop',
-      clientName: projectForm.clientName || '',
-      clientTestimonial: projectForm.clientTestimonial || '',
+      clientName: projectForm.clientName ? projectForm.clientName.trim() : '',
+      clientTestimonial: projectForm.clientTestimonial ? projectForm.clientTestimonial.trim() : '',
       clientAvatar: projectForm.clientName ? projectForm.clientName.split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase() : 'LH',
-      tags: projectForm.tags || [],
+      tags: projectForm.tags && projectForm.tags.length > 0 ? projectForm.tags : ['Independent Villa'],
       status: projectForm.isOngoing ? 'Ongoing' : 'Completed',
-      gallery: [projectForm.heroImage],
+      gallery,
       isRecent: Boolean(projectForm.isRecent)
     };
 
@@ -452,7 +466,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         keywords: blogForm.category
       },
       featuredImage: 'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?q=80&w=800&auto=format&fit=crop',
-      author: 'Er. Vignesh K (MD, Lifehut Developers)',
+      author: 'Chief Civil Engineer (Lifehut Developers)',
       date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
     };
 
@@ -526,6 +540,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       seoTitle: settingsForm.seoTitle || "Top Residential Building Construction Company in Chennai | Lifehut Developers",
       seoDescription: settingsForm.seoDescription || "Leading residential building construction company in Chennai.",
       seoKeywords: settingsForm.seoKeywords || "residential building construction company, turnkey house builders chennai",
+      razorpayKeyId: settingsForm.razorpayKeyId || "",
+      razorpayKeySecret: settingsForm.razorpayKeySecret || "",
+      razorpayEnabled: settingsForm.razorpayEnabled,
       stats: {
         projectsDone: settingsForm.projectsDone,
         experienceYears: settingsForm.experienceYears,
@@ -584,15 +601,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setEditingItemType('service');
     setEditingItemId(svc.id);
     setServiceForm({
-      title: svc.title,
-      description: svc.description,
-      banner: svc.banner,
-      features: svc.features.join('\n'),
+      title: svc.title || '',
+      description: svc.description || '',
+      banner: svc.banner || '',
+      features: (svc.features || []).join('\n'),
       faqs: ''
     });
     setServiceFaqs(
       svc.faqs && svc.faqs.length > 0
-        ? svc.faqs.map(f => ({ ...f }))
+        ? svc.faqs.map(f => ({ question: f.question || '', answer: f.answer || '' }))
         : [{ question: '', answer: '' }]
     );
   };
@@ -652,15 +669,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setProjectImageUploadError(null);
     setProjectImageMode('upload');
     setProjectForm({
-      name: proj.name,
-      location: proj.location,
+      name: proj.name || '',
+      location: proj.location || '',
       completionDate: formatForDatePicker(proj.completionDate),
       plotSize: proj.builtUpArea || proj.plotSize || '',
       builtUpArea: proj.builtUpArea || proj.plotSize || '',
       bedrooms: proj.bedrooms || 3,
       floors: proj.floors || 2,
       budget: proj.budget || '',
-      heroImage: proj.heroImage,
+      heroImage: proj.heroImage || '',
       clientName: proj.clientName || '',
       clientTestimonial: proj.clientTestimonial || '',
       tags: proj.tags && proj.tags.length > 0 ? proj.tags : ['Independent Villa'],
@@ -673,10 +690,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setEditingItemType('blog');
     setEditingItemId(b.id);
     setBlogForm({
-      title: b.title,
-      category: b.category,
+      title: b.title || '',
+      category: b.category || 'Structural',
       readTime: b.readTime || b.readingTime || "5 min read",
-      content: b.content
+      content: b.content || ''
     });
   };
 
@@ -706,7 +723,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <input
                 type="text"
                 required
-                value={username}
+                value={username ?? ''}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="Admin username..."
                 className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#1A6DB5] text-white"
@@ -718,7 +735,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <input
                 type="password"
                 required
-                value={password}
+                value={password ?? ''}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Admin password..."
                 className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#1A6DB5] text-white"
@@ -762,45 +779,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
 
         {/* Dynamic Metric Cards Row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-10">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-10">
           
-          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-orange-50 text-orange-500 flex items-center justify-center">
-              <Users className="w-6 h-6" />
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-orange-50 text-orange-500 flex items-center justify-center flex-shrink-0">
+              <Users className="w-5 h-5" />
             </div>
             <div>
               <div className="text-slate-400 text-[10px] font-bold uppercase">Enquiries & Quotes</div>
-              <div className="text-2xl font-extrabold text-[#1A2332] mt-0.5">{enquiries.length}</div>
+              <div className="text-xl sm:text-2xl font-extrabold text-[#1A2332] mt-0.5">{enquiries.length}</div>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-sky-50 text-[#1A6DB5] flex items-center justify-center">
-              <Briefcase className="w-6 h-6" />
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+              <Home className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-slate-400 text-[10px] font-bold uppercase">House Plans</div>
+              <div className="text-xl sm:text-2xl font-extrabold text-[#1A2332] mt-0.5">{housePlans.length || 8}</div>
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-sky-50 text-[#1A6DB5] flex items-center justify-center flex-shrink-0">
+              <Briefcase className="w-5 h-5" />
             </div>
             <div>
               <div className="text-slate-400 text-[10px] font-bold uppercase">Active Projects</div>
-              <div className="text-2xl font-extrabold text-[#1A2332] mt-0.5">{projects.length}</div>
+              <div className="text-xl sm:text-2xl font-extrabold text-[#1A2332] mt-0.5">{projects.length}</div>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-500 flex items-center justify-center">
-              <FileText className="w-6 h-6" />
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-purple-50 text-purple-500 flex items-center justify-center flex-shrink-0">
+              <FileText className="w-5 h-5" />
             </div>
             <div>
               <div className="text-slate-400 text-[10px] font-bold uppercase">Expert Blogs</div>
-              <div className="text-2xl font-extrabold text-[#1A2332] mt-0.5">{blogs.length}</div>
+              <div className="text-xl sm:text-2xl font-extrabold text-[#1A2332] mt-0.5">{blogs.length}</div>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-green-50 text-green-500 flex items-center justify-center">
-              <Check className="w-6 h-6" />
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-green-50 text-green-500 flex items-center justify-center flex-shrink-0">
+              <Check className="w-5 h-5" />
             </div>
             <div>
               <div className="text-slate-400 text-[10px] font-bold uppercase">Total Services</div>
-              <div className="text-2xl font-extrabold text-[#1A2332] mt-0.5">{services.length}</div>
+              <div className="text-xl sm:text-2xl font-extrabold text-[#1A2332] mt-0.5">{services.length}</div>
             </div>
           </div>
 
@@ -810,11 +837,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         <div className="flex border-b border-slate-200 overflow-x-auto whitespace-nowrap mb-8 gap-6">
           {[
             { id: 'enquiries', label: 'Client Lead Enquiries', icon: Users },
+            { id: 'housePlans', label: 'House Plans Catalog', icon: Home },
             { id: 'projects', label: 'Projects Gallery', icon: Briefcase },
             { id: 'blogs', label: 'Blog Manuals', icon: FileText },
             { id: 'services', label: 'Specializations', icon: Check },
-            { id: 'settings', label: 'Site Metrics & SEO', icon: SettingsIcon },
-            { id: 'database', label: 'Supabase DB & Storage', icon: Database }
+            { id: 'settings', label: 'Site Metrics & SEO', icon: SettingsIcon }
           ].map((tab) => {
             const Icon = tab.icon;
             return (
@@ -829,19 +856,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               >
                 <Icon className="w-4 h-4" />
                 <span>{tab.label}</span>
-                {tab.id === 'database' && (
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${
-                    isSupabaseConfigured() ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                  }`}>
-                    {isSupabaseConfigured() ? 'Active' : 'Setup'}
-                  </span>
-                )}
               </button>
             );
           })}
         </div>
 
         {/* SUBTAB DETAILS MODULES */}
+
+        {/* House Plans CMS Subtab */}
+        {activeSubTab === 'housePlans' && (
+          <AdminHousePlans
+            housePlans={housePlans}
+            refreshAllData={refreshAllData}
+            isStaticMode={isStaticMode}
+          />
+        )}
 
         {/* 1. Enquiries Leads */}
         {activeSubTab === 'enquiries' && (
@@ -883,9 +912,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         {activeSubTab === 'projects' && (
           <div className="bg-white border border-slate-100 rounded-3xl p-6 sm:p-8 shadow-sm">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="font-display text-lg font-bold text-[#1A2332] border-l-4 border-[#1A6DB5] pl-3">
-                Portfolio Projects Panel
-              </h3>
+              <div>
+                <h3 className="font-display text-lg font-bold text-[#1A2332] border-l-4 border-[#1A6DB5] pl-3">
+                  Portfolio Projects Panel
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 pl-3">
+                  Manage projects, tags, client testimonials, and home featured status.
+                </p>
+              </div>
+
               <button
                 onClick={() => {
                   setEditingItemType('project');
@@ -903,7 +938,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     isOngoing: false
                   });
                 }}
-                className="px-4 py-2 bg-[#1A6DB5] hover:bg-[#1558a0] text-white text-xs font-bold rounded-xl flex items-center gap-1"
+                className="px-4 py-2 bg-[#1A6DB5] hover:bg-[#1558a0] text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Add Project</span>
@@ -1095,7 +1130,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Hero Main Headline</label>
                   <input
                     type="text"
-                    value={settingsForm.heroTitle}
+                    value={settingsForm.heroTitle ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, heroTitle: e.target.value })}
                     placeholder="Turnkey House Construction in Chennai"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1106,7 +1141,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Hero Subtitle</label>
                   <input
                     type="text"
-                    value={settingsForm.heroSubtitle}
+                    value={settingsForm.heroSubtitle ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, heroSubtitle: e.target.value })}
                     placeholder="Top Residential Building Construction Company in Chennai"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1118,7 +1153,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <label className="text-xs font-bold text-slate-600">Hero Banner Image URL</label>
                 <input
                   type="text"
-                  value={settingsForm.heroBannerImage}
+                  value={settingsForm.heroBannerImage ?? ''}
                   onChange={(e) => setSettingsForm({ ...settingsForm, heroBannerImage: e.target.value })}
                   placeholder="/src/assets/images/hero_villa_1784191464588.jpg"
                   className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1134,7 +1169,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Projects Completed</label>
                   <input
                     type="text"
-                    value={settingsForm.projectsDone}
+                    value={settingsForm.projectsDone ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, projectsDone: e.target.value })}
                     placeholder="120+"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1145,7 +1180,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Years Active Experience</label>
                   <input
                     type="text"
-                    value={settingsForm.experienceYears}
+                    value={settingsForm.experienceYears ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, experienceYears: e.target.value })}
                     placeholder="7+"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1156,7 +1191,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Client Satisfaction</label>
                   <input
                     type="text"
-                    value={settingsForm.clientSatisfaction}
+                    value={settingsForm.clientSatisfaction ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, clientSatisfaction: e.target.value })}
                     placeholder="99%"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1167,7 +1202,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Hidden Charges Guarantee</label>
                   <input
                     type="text"
-                    value={settingsForm.hiddenCharges}
+                    value={settingsForm.hiddenCharges ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, hiddenCharges: e.target.value })}
                     placeholder="₹0"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1184,7 +1219,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Corporate Email</label>
                   <input
                     type="email"
-                    value={settingsForm.email}
+                    value={settingsForm.email ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, email: e.target.value })}
                     placeholder="contact@lifehutdevelopers.com"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1195,7 +1230,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Direct Phone Hotline</label>
                   <input
                     type="text"
-                    value={settingsForm.phone}
+                    value={settingsForm.phone ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, phone: e.target.value })}
                     placeholder="+91 80721 63330"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1206,7 +1241,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">WhatsApp Number (with country code)</label>
                   <input
                     type="text"
-                    value={settingsForm.whatsappNumber}
+                    value={settingsForm.whatsappNumber ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, whatsappNumber: e.target.value })}
                     placeholder="918072163330"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1219,7 +1254,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Business Working Hours</label>
                   <input
                     type="text"
-                    value={settingsForm.hours}
+                    value={settingsForm.hours ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, hours: e.target.value })}
                     placeholder="Mon – Sat: 9:00 AM – 6:00 PM"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1230,7 +1265,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Headquarters Address</label>
                   <textarea
                     rows={2}
-                    value={settingsForm.address}
+                    value={settingsForm.address ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, address: e.target.value })}
                     placeholder="No. 14, 2nd Cross Street, AGS Colony, Velachery, Chennai - 600042"
                     className="border border-slate-200 p-3 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1247,7 +1282,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Instagram Profile URL</label>
                   <input
                     type="text"
-                    value={settingsForm.instagramUrl}
+                    value={settingsForm.instagramUrl ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, instagramUrl: e.target.value })}
                     placeholder="https://instagram.com/lifehut_developers"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1258,7 +1293,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">YouTube Channel URL</label>
                   <input
                     type="text"
-                    value={settingsForm.youtubeUrl}
+                    value={settingsForm.youtubeUrl ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, youtubeUrl: e.target.value })}
                     placeholder="https://youtube.com/@lifehutdevelopers"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1269,7 +1304,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Pinterest Profile URL</label>
                   <input
                     type="text"
-                    value={settingsForm.pinterestUrl}
+                    value={settingsForm.pinterestUrl ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, pinterestUrl: e.target.value })}
                     placeholder="https://in.pinterest.com/lifehutdevelopers"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1280,7 +1315,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-xs font-bold text-slate-600">Facebook Page URL</label>
                   <input
                     type="text"
-                    value={settingsForm.facebookUrl}
+                    value={settingsForm.facebookUrl ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, facebookUrl: e.target.value })}
                     placeholder="https://facebook.com/lifehutdevelopers"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -1300,7 +1335,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <label className="text-xs font-bold text-slate-700">SEO Meta Title (Browser & Google Search Header)</label>
                 <input
                   type="text"
-                  value={settingsForm.seoTitle}
+                  value={settingsForm.seoTitle ?? ''}
                   onChange={(e) => setSettingsForm({ ...settingsForm, seoTitle: e.target.value })}
                   placeholder="Top Residential Building Construction Company in Chennai | Lifehut Developers"
                   className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 bg-white focus:border-[#1A6DB5] outline-none"
@@ -1311,7 +1346,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <label className="text-xs font-bold text-slate-700">SEO Meta Description (Google Snippet Description)</label>
                 <textarea
                   rows={2}
-                  value={settingsForm.seoDescription}
+                  value={settingsForm.seoDescription ?? ''}
                   onChange={(e) => setSettingsForm({ ...settingsForm, seoDescription: e.target.value })}
                   placeholder="Leading residential building construction company in Chennai offering transparent packages, 100% vastu compliance, and on-time handover."
                   className="border border-slate-200 p-3 text-xs rounded-xl text-slate-800 bg-white focus:border-[#1A6DB5] outline-none"
@@ -1322,11 +1357,95 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <label className="text-xs font-bold text-slate-700">SEO Keywords (Comma-Separated)</label>
                 <input
                   type="text"
-                  value={settingsForm.seoKeywords}
+                  value={settingsForm.seoKeywords ?? ''}
                   onChange={(e) => setSettingsForm({ ...settingsForm, seoKeywords: e.target.value })}
                   placeholder="residential building construction company, turnkey house builders chennai, villa contractors, civil engineering chennai"
                   className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 bg-white focus:border-[#1A6DB5] outline-none"
                 />
+              </div>
+            </div>
+
+            {/* Razorpay Payment Gateway Integration */}
+            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                    ₹
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-[#1A2332] flex items-center gap-2">
+                      Razorpay Payment Gateway Configuration
+                      {settingsForm.razorpayKeyId ? (
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold">
+                          Live Active
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full font-bold">
+                          Sandbox / Demo Active
+                        </span>
+                      )}
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Configure your Razorpay API credentials to accept payments for full CAD &amp; PDF drawings download.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settingsForm.razorpayEnabled}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, razorpayEnabled: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#1A6DB5]"></div>
+                    <span className="ml-2 text-xs font-semibold text-slate-700">Checkout Enabled</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                    <span>Razorpay Key ID</span>
+                    <span className="text-[10px] font-mono text-slate-400">rzp_live_... or rzp_test_...</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={settingsForm.razorpayKeyId ?? ''}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, razorpayKeyId: e.target.value })}
+                    placeholder="rzp_live_1234567890abcdef"
+                    className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 bg-white focus:border-[#1A6DB5] outline-none font-mono"
+                  />
+                  <span className="text-[10px] text-slate-400">
+                    Found under Razorpay Dashboard → Settings → API Keys.
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                    <span>Razorpay Key Secret</span>
+                    <span className="text-[10px] font-mono text-slate-400">Secret Token</span>
+                  </label>
+                  <input
+                    type="password"
+                    value={settingsForm.razorpayKeySecret ?? ''}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, razorpayKeySecret: e.target.value })}
+                    placeholder="••••••••••••••••••••••••"
+                    className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 bg-white focus:border-[#1A6DB5] outline-none font-mono"
+                  />
+                  <span className="text-[10px] text-slate-400">
+                    Never exposed to client browsers. Secured on server.
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl text-[11px] text-blue-900 flex items-start gap-2">
+                <span className="font-bold text-blue-700 flex-shrink-0">Tip:</span>
+                <span>
+                  When Razorpay API keys are configured, clients complete seamless payments via UPI (Google Pay, PhonePe, Paytm), NetBanking, or Credit/Debit Cards. If left blank, simulated sandbox checkout is automatically enabled so you and clients can test instant downloads without charges.
+                </span>
               </div>
             </div>
 
@@ -1358,209 +1477,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </form>
         )}
 
-        {/* 6. Supabase Database & Storage Setup */}
-        {activeSubTab === 'database' && (
-          <div className="bg-white border border-slate-100 rounded-3xl p-6 sm:p-8 shadow-sm flex flex-col gap-8 text-left">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-6 border-b border-slate-100">
-              <div>
-                <span className="text-xs font-mono font-bold text-[#1A6DB5] uppercase tracking-wider">Cloud Backend & API Architecture</span>
-                <h3 className="font-display text-xl font-extrabold text-[#1A2332] mt-1 flex items-center gap-2">
-                  <Database className="w-5 h-5 text-[#1A6DB5]" />
-                  <span>Supabase Integration Dashboard</span>
-                </h3>
-              </div>
-              <div className={`px-4 py-2 rounded-2xl flex items-center gap-2 text-xs font-bold font-mono border ${
-                isSupabaseConfigured()
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : 'bg-amber-50 text-amber-700 border-amber-200'
-              }`}>
-                <span className={`w-2.5 h-2.5 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                <span>{isSupabaseConfigured() ? 'CONNECTED TO SUPABASE' : 'SUPABASE ENV VARS PENDING'}</span>
-              </div>
-            </div>
-
-            {/* Connection Status & Instructions Card */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200/80 flex flex-col gap-4">
-                <h4 className="font-display text-sm font-extrabold text-[#1A2332] flex items-center gap-2">
-                  <ExternalLink className="w-4 h-4 text-[#1A6DB5]" />
-                  <span>Cloudflare / Vite Environment Credentials</span>
-                </h4>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  To connect your front-end and admin panel directly to Supabase, set these environment variables in your Cloudflare Pages or host deployment environment settings:
-                </p>
-                
-                <div className="flex flex-col gap-2 font-mono text-[11px]">
-                  <div className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center">
-                    <span className="text-slate-500 font-bold">VITE_SUPABASE_URL</span>
-                    <span className="text-[#1A6DB5] truncate max-w-[200px]">
-                      {((import.meta as unknown as { env?: Record<string, string> }).env)?.VITE_SUPABASE_URL || 'https://your-project.supabase.co'}
-                    </span>
-                  </div>
-                  <div className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center">
-                    <span className="text-slate-500 font-bold">VITE_SUPABASE_ANON_KEY</span>
-                    <span className="text-slate-400 truncate max-w-[200px]">
-                      {((import.meta as unknown as { env?: Record<string, string> }).env)?.VITE_SUPABASE_ANON_KEY ? '••••••••••••••••' : 'your-anon-key-here'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-[11px] text-slate-500 bg-sky-50 p-3 rounded-xl border border-sky-100 flex items-start gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-[#1A6DB5] flex-shrink-0 mt-0.5" />
-                  <span><strong>Auth Persisted:</strong> Admin login credential security remains intact while all admin data (Services, Projects, Enquiries, Quotes, Settings) syncs in real-time with Supabase tables.</span>
-                </div>
-              </div>
-
-              <div className="bg-[#1A2332] text-white p-6 rounded-2xl border border-slate-800 flex flex-col justify-between gap-4">
-                <div>
-                  <span className="text-[10px] font-mono font-bold text-[#F47B20] uppercase tracking-widest">1-Click SQL Setup</span>
-                  <h4 className="font-display text-base font-bold text-white mt-1">
-                    Supabase Database Tables & RLS Policies
-                  </h4>
-                  <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                    Copy this pre-configured SQL script and run it in your <strong className="text-white">Supabase Dashboard → SQL Editor</strong> to automatically create all required tables (<code className="text-sky-300">services</code>, <code className="text-sky-300">projects</code>, <code className="text-sky-300">enquiries</code>, <code className="text-sky-300">quotes</code>, <code className="text-sky-300">settings</code>) and storage buckets.
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => {
-                    const sqlText = `-- Lifehut Developers Supabase SQL Migration Schema
-CREATE TABLE IF NOT EXISTS public.services (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    banner TEXT,
-    description TEXT,
-    features JSONB DEFAULT '[]'::jsonb,
-    gallery JSONB DEFAULT '[]'::jsonb,
-    faqs JSONB DEFAULT '[]'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.projects (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    hero_image TEXT,
-    gallery JSONB DEFAULT '[]'::jsonb,
-    completion_date TEXT,
-    plot_size TEXT,
-    built_up_area TEXT,
-    floors INTEGER DEFAULT 1,
-    bedrooms INTEGER DEFAULT 1,
-    budget TEXT,
-    location TEXT,
-    client_testimonial TEXT,
-    client_name TEXT,
-    client_avatar TEXT,
-    status TEXT DEFAULT 'Completed',
-    tags JSONB DEFAULT '[]'::jsonb,
-    is_recent BOOLEAN DEFAULT false,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Ensure optional columns exist on existing tables
-ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb;
-ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS is_recent BOOLEAN DEFAULT false;
-
-CREATE TABLE IF NOT EXISTS public.enquiries (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    phone TEXT NOT NULL,
-    email TEXT,
-    service TEXT,
-    message TEXT,
-    date TEXT,
-    status TEXT DEFAULT 'New',
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.quotes (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    phone TEXT NOT NULL,
-    email TEXT,
-    area NUMERIC,
-    floors TEXT,
-    ctype TEXT,
-    interior TEXT,
-    extras TEXT,
-    estimated_cost TEXT,
-    date TEXT,
-    status TEXT DEFAULT 'New',
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.settings (
-    id TEXT PRIMARY KEY DEFAULT 'site_settings',
-    hero_title TEXT,
-    hero_subtitle TEXT,
-    hero_banner_image TEXT,
-    address TEXT,
-    phone TEXT,
-    email TEXT,
-    hours TEXT,
-    whatsapp_number TEXT,
-    facebook_url TEXT,
-    instagram_url TEXT,
-    pinterest_url TEXT,
-    youtube_url TEXT,
-    linkedin_url TEXT,
-    seo_title TEXT,
-    seo_description TEXT,
-    seo_keywords TEXT,
-    stats JSONB DEFAULT '{"projectsDone":"120+","experienceYears":"7+","clientSatisfaction":"99%","hiddenCharges":"₹0"}'::jsonb,
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-ALTER TABLE public.services ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.enquiries ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.quotes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Allow public all access on services" ON public.services FOR ALL USING (true);
-CREATE POLICY "Allow public all access on projects" ON public.projects FOR ALL USING (true);
-CREATE POLICY "Allow public all access on enquiries" ON public.enquiries FOR ALL USING (true);
-CREATE POLICY "Allow public all access on quotes" ON public.quotes FOR ALL USING (true);
-CREATE POLICY "Allow public all access on settings" ON public.settings FOR ALL USING (true);
-
--- Storage Bucket Setup for Project & Service Images (Public Uploads)
-INSERT INTO storage.buckets (id, name, public) 
-VALUES ('cms-uploads', 'cms-uploads', true) 
-ON CONFLICT (id) DO NOTHING;
-
-CREATE POLICY "Public Read Access for cms-uploads" ON storage.objects 
-FOR SELECT USING (bucket_id = 'cms-uploads');
-
-CREATE POLICY "Public Upload Access for cms-uploads" ON storage.objects 
-FOR INSERT WITH CHECK (bucket_id = 'cms-uploads');
-
-CREATE POLICY "Public Update/Delete Access for cms-uploads" ON storage.objects 
-FOR ALL USING (bucket_id = 'cms-uploads');`;
-                    navigator.clipboard.writeText(sqlText);
-                    setCopiedSql(true);
-                    setTimeout(() => setCopiedSql(false), 3000);
-                  }}
-                  className="w-full py-3.5 bg-[#1A6DB5] hover:bg-[#1558a0] text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#1A6DB5]/20"
-                >
-                  {copiedSql ? (
-                    <>
-                      <Check className="w-4 h-4 text-emerald-300" />
-                      <span>SQL Script Copied to Clipboard!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4" />
-                      <span>Copy Supabase SQL Schema Script</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-            </div>
-          </div>
-        )}
-
         {/* EDITING FORM MODALS (Glass/Overlay) */}
         {editingItemType !== null && (
           <div className="fixed inset-0 bg-[#1A2332]/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1583,17 +1499,17 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                 <form onSubmit={handleSaveService} className="flex flex-col gap-4">
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-bold text-slate-500">Service Title</label>
-                    <input type="text" required value={serviceForm.title} onChange={(e) => setServiceForm({ ...serviceForm, title: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
+                    <input type="text" required value={serviceForm.title ?? ''} onChange={(e) => setServiceForm({ ...serviceForm, title: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
                   </div>
 
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-bold text-slate-500">Description Overview</label>
-                    <textarea rows={3} required value={serviceForm.description} onChange={(e) => setServiceForm({ ...serviceForm, description: e.target.value })} className="border border-slate-200 p-3 text-xs rounded-xl" />
+                    <textarea rows={3} required value={serviceForm.description ?? ''} onChange={(e) => setServiceForm({ ...serviceForm, description: e.target.value })} className="border border-slate-200 p-3 text-xs rounded-xl" />
                   </div>
 
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-bold text-slate-500">Banner Image URL</label>
-                    <input type="text" required value={serviceForm.banner} onChange={(e) => setServiceForm({ ...serviceForm, banner: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
+                    <input type="text" required value={serviceForm.banner ?? ''} onChange={(e) => setServiceForm({ ...serviceForm, banner: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
                   </div>
 
                   <div className="flex flex-col gap-1">
@@ -1601,7 +1517,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                     <textarea
                       rows={4}
                       required
-                      value={serviceForm.features}
+                      value={serviceForm.features ?? ''}
                       onChange={(e) => setServiceForm({ ...serviceForm, features: e.target.value })}
                       placeholder={"Custom 2D floor plans & 3D front elevations\nHigh-grade Fe 550 TMT steel, UltraTech cement\nDedicated site supervision by qualified civil engineers"}
                       className="border border-slate-200 p-3 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none font-sans leading-relaxed"
@@ -1644,7 +1560,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                           </div>
                           <input
                             type="text"
-                            value={faq.question}
+                            value={faq.question ?? ''}
                             onChange={(e) => {
                               const updated = [...serviceFaqs];
                               updated[idx].question = e.target.value;
@@ -1655,7 +1571,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                           />
                           <textarea
                             rows={2}
-                            value={faq.answer}
+                            value={faq.answer ?? ''}
                             onChange={(e) => {
                               const updated = [...serviceFaqs];
                               updated[idx].answer = e.target.value;
@@ -1685,7 +1601,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                         type="text"
                         required
                         placeholder="e.g. Modern 4BHK Luxury Villa"
-                        value={projectForm.name}
+                        value={projectForm.name ?? ''}
                         onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })}
                         className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
                       />
@@ -1698,7 +1614,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                       <input
                         type="text"
                         placeholder="e.g. Mr. Mohanraj / Dr. Senthil"
-                        value={projectForm.clientName}
+                        value={projectForm.clientName ?? ''}
                         onChange={(e) => setProjectForm({ ...projectForm, clientName: e.target.value })}
                         className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
                       />
@@ -1759,7 +1675,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                         type="text"
                         required
                         placeholder="e.g. Keelkattalai, Chennai"
-                        value={projectForm.location}
+                        value={projectForm.location ?? ''}
                         onChange={(e) => setProjectForm({ ...projectForm, location: e.target.value })}
                         className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
                       />
@@ -1772,7 +1688,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                       <input
                         type="date"
                         required
-                        value={projectForm.completionDate}
+                        value={projectForm.completionDate ?? ''}
                         onChange={(e) => setProjectForm({ ...projectForm, completionDate: e.target.value })}
                         className="border border-slate-200 px-4 py-2 text-xs rounded-xl focus:border-[#1A6DB5] outline-none bg-white font-medium text-slate-800"
                       />
@@ -1789,7 +1705,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                         type="text"
                         required
                         placeholder="e.g. 3,200 sq.ft"
-                        value={projectForm.builtUpArea}
+                        value={projectForm.builtUpArea ?? ''}
                         onChange={(e) => setProjectForm({ ...projectForm, builtUpArea: e.target.value, plotSize: e.target.value })}
                         className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
                       />
@@ -1801,7 +1717,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                         required
                         min={1}
                         max={20}
-                        value={projectForm.bedrooms}
+                        value={projectForm.bedrooms ?? 3}
                         onChange={(e) => setProjectForm({ ...projectForm, bedrooms: parseInt(e.target.value) || 1 })}
                         className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
                       />
@@ -1813,7 +1729,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                         required
                         min={1}
                         max={10}
-                        value={projectForm.floors}
+                        value={projectForm.floors ?? 2}
                         onChange={(e) => setProjectForm({ ...projectForm, floors: parseInt(e.target.value) || 1 })}
                         className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
                       />
@@ -1826,7 +1742,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                       <input
                         type="text"
                         placeholder="e.g. ₹85 Lakhs"
-                        value={projectForm.budget}
+                        value={projectForm.budget ?? ''}
                         onChange={(e) => setProjectForm({ ...projectForm, budget: e.target.value })}
                         className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl focus:border-[#1A6DB5] outline-none"
                       />
@@ -1835,7 +1751,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                       <label className="flex items-center gap-2.5 cursor-pointer select-none text-xs font-semibold text-slate-700 w-full">
                         <input
                           type="checkbox"
-                          checked={projectForm.isOngoing}
+                          checked={Boolean(projectForm.isOngoing)}
                           onChange={(e) => setProjectForm({ ...projectForm, isOngoing: e.target.checked })}
                           className="w-4 h-4 rounded border-slate-300 text-[#1A6DB5] focus:ring-0 cursor-pointer accent-[#1A6DB5]"
                         />
@@ -1996,7 +1912,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                         <input
                           type="text"
                           required
-                          value={projectForm.heroImage}
+                          value={projectForm.heroImage ?? ''}
                           onChange={(e) => setProjectForm({ ...projectForm, heroImage: e.target.value })}
                           placeholder="https://images.unsplash.com/... or https://..."
                           className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 focus:border-[#1A6DB5] outline-none"
@@ -2042,7 +1958,7 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                     <label className="relative inline-flex items-center cursor-pointer ml-3 flex-shrink-0">
                       <input
                         type="checkbox"
-                        checked={projectForm.isRecent}
+                        checked={Boolean(projectForm.isRecent)}
                         onChange={(e) => setProjectForm({ ...projectForm, isRecent: e.target.checked })}
                         className="sr-only peer"
                       />
@@ -2061,13 +1977,13 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                 <form onSubmit={handleSaveBlog} className="flex flex-col gap-4">
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-bold text-slate-500">Article Title</label>
-                    <input type="text" required value={blogForm.title} onChange={(e) => setBlogForm({ ...blogForm, title: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
+                    <input type="text" required value={blogForm.title ?? ''} onChange={(e) => setBlogForm({ ...blogForm, title: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-bold text-slate-500">Category</label>
-                      <select value={blogForm.category} onChange={(e) => setBlogForm({ ...blogForm, category: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl bg-white text-slate-700 outline-none">
+                      <select value={blogForm.category ?? 'Structural'} onChange={(e) => setBlogForm({ ...blogForm, category: e.target.value })} className="border border-slate-200 px-4 py-2 text-xs rounded-xl bg-white text-slate-700 outline-none">
                         <option value="Structural">Structural</option>
                         <option value="Materials">Materials</option>
                         <option value="Budgeting">Budgeting</option>
@@ -2076,13 +1992,13 @@ FOR ALL USING (bucket_id = 'cms-uploads');`;
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-bold text-slate-500">Estimated Reading Time</label>
-                      <input type="text" required value={blogForm.readTime} onChange={(e) => setBlogForm({ ...blogForm, readTime: e.target.value })} placeholder="e.g. 5 min read" className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
+                      <input type="text" required value={blogForm.readTime ?? ''} onChange={(e) => setBlogForm({ ...blogForm, readTime: e.target.value })} placeholder="e.g. 5 min read" className="border border-slate-200 px-4 py-2 text-xs rounded-xl" />
                     </div>
                   </div>
 
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-bold text-slate-500">Content Body</label>
-                    <textarea rows={6} required value={blogForm.content} onChange={(e) => setBlogForm({ ...blogForm, content: e.target.value })} placeholder="Write your technical engineering blog detail here..." className="border border-slate-200 p-3 text-xs rounded-xl" />
+                    <textarea rows={6} required value={blogForm.content ?? ''} onChange={(e) => setBlogForm({ ...blogForm, content: e.target.value })} placeholder="Write your technical engineering blog detail here..." className="border border-slate-200 p-3 text-xs rounded-xl" />
                   </div>
 
                   <button type="submit" className="w-full mt-4 py-3 bg-[#1A6DB5] hover:bg-[#1558a0] text-white font-bold text-xs uppercase tracking-wider rounded-xl">

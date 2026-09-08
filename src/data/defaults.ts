@@ -11,6 +11,8 @@ export const defaultSettings: SiteSettings = {
   whatsappNumber: "918072163330",
   instagramUrl: "https://www.instagram.com/lifehut_developers/",
   pinterestUrl: "https://in.pinterest.com/lifehutdevelopers/",
+  youtubeUrl: "https://www.youtube.com/@lifehutdevelopers",
+  facebookUrl: "https://facebook.com/lifehutdevelopers",
   seoTitle: "Top Residential Building Construction Company in Chennai | Lifehut Developers",
   seoDescription: "Leading residential building construction company in Chennai specializing in luxury villas, turnkey house building, structural engineering, and transparent locked pricing.",
   seoKeywords: "residential building construction company, turnkey house builders chennai, luxury villa contractors, independent home construction, house construction cost per sqft chennai, civil engineers chennai",
@@ -180,7 +182,8 @@ export const defaultProjects: Project[] = [
     clientName: "Mr. Mohanraj",
     clientAvatar: "MR",
     status: "Completed",
-    isRecent: true
+    isRecent: true,
+    tags: ["Independent Villa"]
   },
   {
     id: "keelkattalai-duplex-residence",
@@ -201,7 +204,8 @@ export const defaultProjects: Project[] = [
     clientName: "Mr. Gani Iqbal",
     clientAvatar: "GI",
     status: "Completed",
-    isRecent: true
+    isRecent: true,
+    tags: ["Apartments", "Independent Villa"]
   },
   {
     id: "omr-independent-house",
@@ -221,7 +225,8 @@ export const defaultProjects: Project[] = [
     clientName: "Mr. Navin Kumar",
     clientAvatar: "NV",
     status: "Completed",
-    isRecent: true
+    isRecent: true,
+    tags: ["Independent Villa"]
   }
 ];
 
@@ -231,7 +236,7 @@ export const defaultBlogs: Blog[] = [
     title: "Essential Structural & Foundation Guidelines for Residential House Construction in Chennai",
     slug: "structural-foundation-guidelines",
     featuredImage: "https://images.unsplash.com/photo-1541888946425-d81bb19240f5?q=80&w=800&auto=format&fit=crop",
-    author: "Er. Vignesh K (Chief Structural Engineer)",
+    author: "Chief Structural Engineer",
     category: "Engineering first",
     tags: ["Foundation Design", "Structural Engineering", "Chennai House Construction", "RCC Framing"],
     seoMeta: {
@@ -265,7 +270,7 @@ Always insist on certified structural drawings and brand-verified materials befo
     title: "Turnkey House Construction vs. Hiring Subcontractors in Chennai: Cost Breakdown",
     slug: "turnkey-vs-individual-contractors",
     featuredImage: "https://images.unsplash.com/photo-1504307651254-35680f356dfd?q=80&w=800&auto=format&fit=crop",
-    author: "Er. Vignesh K (MD, Lifehut Developers)",
+    author: "Principal Civil Engineer (Lifehut Developers)",
     category: "Homeowner Guide",
     tags: ["Turnkey Construction", "House Construction Cost", "Chennai Builders", "Budgeting"],
     seoMeta: {

@@ -26,6 +26,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     services: { id: string; title: string; desc: string }[];
     projects: { id: string; title: string; desc: string }[];
     blogs: { id: string; title: string; desc: string }[];
+    housePlans?: { id: string; title: string; desc: string }[];
   } | null>(null);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
@@ -124,6 +125,8 @@ export const Navbar: React.FC<NavbarProps> = ({
       window.dispatchEvent(new CustomEvent('nav-service', { detail: id }));
     } else if (type === 'projects') {
       window.dispatchEvent(new CustomEvent('nav-project', { detail: id }));
+    } else if (type === 'house-plans') {
+      window.dispatchEvent(new CustomEvent('nav-house-plan', { detail: id }));
     }
   };
 
@@ -197,7 +200,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
 
         {/* Desktop Navigation Links */}
-        <nav className="hidden lg:flex items-center gap-7">
+        <nav className="hidden lg:flex items-center gap-6 xl:gap-7">
           <button
             onClick={() => handleNavClick('home')}
             className={`text-sm font-display font-semibold transition-colors cursor-pointer ${
@@ -205,6 +208,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             Home
+          </button>
+          <button
+            onClick={() => handleNavClick('house-plans')}
+            className={`text-sm font-display font-semibold transition-colors cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'house-plans' ? 'text-blue-700 font-bold' : 'text-grey-600 hover:text-blue-700'
+            }`}
+          >
+            <span>House Plans</span>
+            <span className="hidden xl:inline-block px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold uppercase tracking-wider">New</span>
           </button>
           <button
             onClick={() => handleNavClick('services')}
@@ -260,7 +272,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-grey-400" />
               <input
                 type="text"
-                value={searchQuery}
+                value={searchQuery ?? ''}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onFocus={() => setIsSearchFocused(true)}
                 placeholder="Search projects, services..."
@@ -305,7 +317,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
                   )}
 
-                  {searchSuggestions && searchSuggestions.services.length === 0 && searchSuggestions.projects.length === 0 && (
+                  {searchSuggestions?.housePlans && searchSuggestions.housePlans.length > 0 && (
+                    <div>
+                      <div className="text-[10px] font-bold tracking-wider text-grey-400 uppercase mb-1 px-2">House Plans</div>
+                      {searchSuggestions.housePlans.map((hp) => (
+                        <button
+                          key={hp.id}
+                          onClick={() => handleSuggestionClick('house-plans', hp.id)}
+                          className="w-full text-left p-2 rounded-lg hover:bg-blue-50/50 transition-colors"
+                        >
+                          <div className="text-xs font-bold text-blue-900">{hp.title}</div>
+                          <div className="text-[10px] text-grey-500 truncate">📐 {hp.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {searchSuggestions && searchSuggestions.services.length === 0 && searchSuggestions.projects.length === 0 && (!searchSuggestions.housePlans || searchSuggestions.housePlans.length === 0) && (
                     <div className="text-center py-6 text-grey-400 text-xs">
                       No matches found for "{searchQuery}"
                     </div>
@@ -353,6 +381,15 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               Home
+            </button>
+            <button
+              onClick={() => handleNavClick('house-plans')}
+              className={`text-left font-display font-bold text-lg py-1 flex items-center justify-between ${
+                activeTab === 'house-plans' ? 'text-blue-700 font-extrabold' : 'text-ink'
+              }`}
+            >
+              <span>House Plans</span>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold uppercase tracking-wider">New</span>
             </button>
             <button
               onClick={() => handleNavClick('services')}

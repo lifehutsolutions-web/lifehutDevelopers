@@ -165,6 +165,12 @@ export const Footer: React.FC<FooterProps> = ({
                 </button>
               </li>
               <li>
+                <button onClick={() => handleNav('house-plans')} className="hover:text-blue-700 transition-colors cursor-pointer flex items-center gap-1.5">
+                  <span>House Plans</span>
+                  <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">New</span>
+                </button>
+              </li>
+              <li>
                 <button onClick={() => handleNav('process')} className="hover:text-blue-700 transition-colors cursor-pointer">
                   How We Work
                 </button>

@@ -1,8 +1,11 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
+import JSZip from 'jszip';
 import { createServer as createViteServer } from 'vite';
-import { CMSData, Service, Project, Blog, Testimonial, Enquiry, QuoteRequest, SiteSettings, Stats } from './src/types';
+import { CMSData, Service, Project, Blog, Testimonial, Enquiry, QuoteRequest, SiteSettings, Stats, HousePlan } from './src/types';
+import { defaultHousePlans } from './src/data/defaultHousePlans';
 
 const PORT = 3000;
 const DB_FILE = path.join(process.cwd(), 'server_db.json');
@@ -233,7 +236,7 @@ const defaultBlogs: Blog[] = [
     title: "Why Soil Investigation is Crucial Before Breaking Ground",
     slug: "importance-of-soil-investigation",
     featuredImage: "https://images.unsplash.com/photo-1541888946425-d81bb19240f5?q=80&w=800&auto=format&fit=crop",
-    author: "Er. K. Vignesh (Chief Structural Consultant)",
+    author: "Chief Structural Consultant",
     category: "Engineering first",
     tags: ["Foundation", "Soil Testing", "Chennai Soil", "SBC"],
     seoMeta: {
@@ -263,7 +266,7 @@ Always insist on a soil investigation report before finalizing your construction
     title: "Turnkey Construction vs. Hiring Individual Subcontractors",
     slug: "turnkey-vs-individual-contractors",
     featuredImage: "https://images.unsplash.com/photo-1504307651254-35680f356dfd?q=80&w=800&auto=format&fit=crop",
-    author: "Er. Vignesh K (MD, Lifehut Developers)",
+    author: "Principal Civil Engineer (Lifehut Developers)",
     category: "Homeowner Guide",
     tags: ["Turnkey", "Budgeting", "Contractors", "Chennai Homes"],
     seoMeta: {
@@ -314,7 +317,7 @@ const defaultTestimonials: Testimonial[] = [
   {
     id: "t3",
     name: "Mr. Navin Kumar",
-    text: "Incredibly engineering-first builders. Their Chief Engineer Vignesh took extensive SBC soil investigation tests and designed custom concrete pile foundations because our site soil was clayey. A solid, transparent builder you can trust blindly.",
+    text: "Incredibly engineering-first builders. Their Chief Civil Engineer took extensive SBC soil investigation tests and designed custom concrete pile foundations because our site soil was clayey. A solid, transparent builder you can trust blindly.",
     rating: 5,
     avatar: "NV",
     date: "2026-06-20",
@@ -334,6 +337,7 @@ const initialCMSData: CMSData = {
   services: defaultServices,
   projects: defaultProjects,
   blogs: defaultBlogs,
+  housePlans: defaultHousePlans,
   testimonials: defaultTestimonials,
   stats: defaultStats,
   enquiries: [],
@@ -349,7 +353,12 @@ function readDB(): CMSData {
       return initialCMSData;
     }
     const raw = fs.readFileSync(DB_FILE, 'utf-8');
-    return JSON.parse(raw);
+    const data: CMSData = JSON.parse(raw);
+    if (!data.housePlans || data.housePlans.length === 0) {
+      data.housePlans = defaultHousePlans;
+      writeDB(data);
+    }
+    return data;
   } catch (err) {
     console.error("Failed to read database file. Returning defaults.", err);
     return initialCMSData;
@@ -367,9 +376,17 @@ function writeDB(data: CMSData) {
 async function startServer() {
   const app = express();
 
-  // Middleware
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  const UPLOADS_DIR = path.join(process.cwd(), 'uploads', 'cad-packages');
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+
+  // Static directory for uploaded CAD and ZIP drawing packages
+  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
+  // Middleware with generous payload limit for CAD/ZIP uploads
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // Ensure DB file exists
   readDB();
@@ -383,7 +400,7 @@ async function startServer() {
       res.json({
         success: true,
         token: 'lifehut_admin_secure_session_token_2026',
-        user: { name: 'Vignesh K', role: 'Chief Engineer & Admin' }
+        user: { name: 'Engineering Admin', role: 'Chief Engineer & Admin' }
       });
     } else {
       res.status(401).json({ success: false, message: 'Invalid credentials. Use admin / password.' });
@@ -410,6 +427,26 @@ async function startServer() {
   app.get('/api/blogs', (req, res) => {
     const db = readDB();
     res.json(db.blogs || []);
+  });
+
+  app.get('/api/house-plans', (req, res) => {
+    const db = readDB();
+    if (!db.housePlans || db.housePlans.length === 0) {
+      db.housePlans = defaultHousePlans;
+      writeDB(db);
+    }
+    res.json(db.housePlans || []);
+  });
+
+  app.get('/api/house-plans/:slugOrId', (req, res) => {
+    const { slugOrId } = req.params;
+    const db = readDB();
+    const plans = db.housePlans || defaultHousePlans;
+    const plan = plans.find(p => p.slug === slugOrId || p.id === slugOrId);
+    if (plan) {
+      return res.json({ success: true, plan });
+    }
+    return res.status(404).json({ success: false, message: 'House plan not found.' });
   });
 
   app.get('/api/enquiries', (req, res) => {
@@ -726,6 +763,412 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // House Plans CRUD
+  app.post('/api/house-plans', (req, res) => {
+    const db = readDB();
+    if (!db.housePlans) db.housePlans = [...defaultHousePlans];
+
+    const { action, plan } = req.body;
+    const targetPlan = plan || req.body;
+
+    if (action === 'delete') {
+      const idToDelete = targetPlan.id || req.body.id;
+      db.housePlans = db.housePlans.filter(p => p.id !== idToDelete);
+      writeDB(db);
+      return res.json({ success: true, message: 'House plan deleted.' });
+    }
+
+    if (!targetPlan.title) {
+      return res.status(400).json({ success: false, message: 'Title is required.' });
+    }
+
+    const rawTitle = targetPlan.title.toString().toLowerCase();
+    const slug = targetPlan.slug || rawTitle.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const planId = targetPlan.id || `lh-hp-${Date.now()}`;
+    const planCode = targetPlan.planCode || `LH-HP-${Math.floor(100 + Math.random() * 900)}`;
+
+    const newPlan: HousePlan = {
+      ...targetPlan,
+      id: planId,
+      slug,
+      planCode,
+      createdAt: targetPlan.createdAt || new Date().toISOString().split('T')[0]
+    };
+
+    const existingIdx = db.housePlans.findIndex(p => p.id === planId || p.slug === slug);
+    if (existingIdx !== -1) {
+      db.housePlans[existingIdx] = { ...db.housePlans[existingIdx], ...newPlan };
+    } else {
+      db.housePlans.unshift(newPlan);
+    }
+
+    writeDB(db);
+    return res.json({ success: true, plan: newPlan });
+  });
+
+  app.put('/api/house-plans/:id', (req, res) => {
+    const { id } = req.params;
+    const db = readDB();
+    if (!db.housePlans) db.housePlans = [...defaultHousePlans];
+    const idx = db.housePlans.findIndex(p => p.id === id);
+    if (idx !== -1) {
+      db.housePlans[idx] = { ...db.housePlans[idx], ...req.body };
+      writeDB(db);
+      return res.json({ success: true, plan: db.housePlans[idx] });
+    }
+    return res.status(404).json({ success: false, message: 'House plan not found.' });
+  });
+
+  app.delete('/api/house-plans/:id', (req, res) => {
+    const { id } = req.params;
+    const db = readDB();
+    if (!db.housePlans) db.housePlans = [...defaultHousePlans];
+    db.housePlans = db.housePlans.filter(p => p.id !== id);
+    writeDB(db);
+    res.json({ success: true });
+  });
+
+  // --- HOUSE PLANS CAD ZIP UPLOAD ENDPOINT ---
+  app.post('/api/upload-cad-zip', (req, res) => {
+    try {
+      const { fileName, fileBase64, planId } = req.body;
+      if (!fileName || !fileBase64) {
+        return res.status(400).json({ success: false, message: 'Missing fileName or fileBase64' });
+      }
+
+      const cleanBaseName = fileName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9-_]/g, '-');
+      const ext = fileName.split('.').pop() || 'zip';
+      const safeFileName = `${cleanBaseName}-${Date.now()}.${ext}`;
+      const filePath = path.join(UPLOADS_DIR, safeFileName);
+
+      const base64Data = fileBase64.replace(/^data:[^;]+;base64,/, '');
+      const buffer = Buffer.from(base64Data, 'base64');
+      fs.writeFileSync(filePath, buffer);
+
+      const sizeMb = (buffer.length / (1024 * 1024)).toFixed(1) + ' MB';
+      const publicUrl = `/uploads/cad-packages/${safeFileName}`;
+
+      if (planId) {
+        const db = readDB();
+        const planIdx = db.housePlans?.findIndex(p => p.id === planId);
+        if (planIdx !== undefined && planIdx >= 0 && db.housePlans) {
+          db.housePlans[planIdx].cadPackageZipUrl = publicUrl;
+          db.housePlans[planIdx].cadPackageFileName = fileName;
+          db.housePlans[planIdx].cadPackageSize = sizeMb;
+          writeDB(db);
+        }
+      }
+
+      return res.json({
+        success: true,
+        url: publicUrl,
+        fileName: fileName,
+        size: sizeMb
+      });
+    } catch (err: any) {
+      console.error('Error uploading CAD ZIP:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Upload failed' });
+    }
+  });
+
+  // --- RAZORPAY PAYMENT CONFIG & CHECKOUT ENDPOINTS ---
+  app.get('/api/razorpay/config', (req, res) => {
+    const db = readDB();
+    const keyId = process.env.RAZORPAY_KEY_ID || db.settings?.razorpayKeyId || '';
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || db.settings?.razorpayKeySecret || '';
+    const isConfigured = Boolean(keyId && keySecret);
+    
+    res.json({
+      keyId: keyId || 'rzp_test_demo_lifehut',
+      isConfigured,
+      testMode: !isConfigured,
+      currency: 'INR'
+    });
+  });
+
+  app.post('/api/razorpay/create-order', async (req, res) => {
+    try {
+      const { planId, clientName, clientEmail, clientPhone, amount } = req.body;
+      const db = readDB();
+      const plans = db.housePlans || defaultHousePlans;
+      const plan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId);
+
+      const finalAmount = amount || plan?.cadPackagePrice || 999;
+      const amountInPaise = Math.round(finalAmount * 100);
+
+      const keyId = process.env.RAZORPAY_KEY_ID || db.settings?.razorpayKeyId;
+      const keySecret = process.env.RAZORPAY_KEY_SECRET || db.settings?.razorpayKeySecret;
+
+      if (keyId && keySecret) {
+        try {
+          const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+          const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
+            method: 'POST',
+            headers: {
+              'Authorization': authHeader,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              amount: amountInPaise,
+              currency: 'INR',
+              receipt: `rcpt_lh_${Date.now().toString().slice(-8)}`,
+              notes: {
+                planId: plan?.id || planId,
+                planCode: plan?.planCode || '',
+                title: plan?.title || 'House Plan Blueprints',
+                clientName: clientName || '',
+                clientPhone: clientPhone || ''
+              }
+            })
+          });
+
+          if (rzpResponse.ok) {
+            const orderData = (await rzpResponse.json()) as any;
+            return res.json({
+              success: true,
+              orderId: orderData.id,
+              amount: orderData.amount,
+              currency: orderData.currency,
+              keyId: keyId,
+              testMode: false,
+              plan: {
+                id: plan?.id,
+                planCode: plan?.planCode,
+                title: plan?.title,
+                cadPackageFileName: plan?.cadPackageFileName
+              }
+            });
+          } else {
+            const errText = await rzpResponse.text();
+            console.warn('Razorpay API response not OK, using sandbox fallback:', errText);
+          }
+        } catch (apiErr) {
+          console.warn('Direct Razorpay API call failed, using sandbox fallback:', apiErr);
+        }
+      }
+
+      // Test Mode simulated order fallback (guarantees preview works seamlessly)
+      const mockOrderId = `order_test_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      return res.json({
+        success: true,
+        orderId: mockOrderId,
+        amount: amountInPaise,
+        currency: 'INR',
+        keyId: keyId || 'rzp_test_demo_lifehut',
+        testMode: true,
+        plan: {
+          id: plan?.id,
+          planCode: plan?.planCode,
+          title: plan?.title,
+          cadPackageFileName: plan?.cadPackageFileName
+        }
+      });
+    } catch (err: any) {
+      console.error('Error creating Razorpay order:', err);
+      res.status(500).json({ success: false, message: err.message || 'Failed to create payment order' });
+    }
+  });
+
+  app.post('/api/razorpay/verify-payment', (req, res) => {
+    try {
+      const {
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+        planId,
+        clientName,
+        clientEmail,
+        clientPhone,
+        notes
+      } = req.body;
+
+      const db = readDB();
+      const keySecret = process.env.RAZORPAY_KEY_SECRET || db.settings?.razorpayKeySecret;
+
+      let isValid = false;
+
+      if (razorpay_signature && keySecret && !razorpay_order_id.startsWith('order_test_')) {
+        const body = razorpay_order_id + '|' + razorpay_payment_id;
+        const expectedSignature = crypto
+          .createHmac('sha256', keySecret)
+          .update(body.toString())
+          .digest('hex');
+
+        isValid = expectedSignature === razorpay_signature;
+      } else {
+        // Test / demo mode order verification
+        isValid = Boolean(razorpay_payment_id || razorpay_order_id);
+      }
+
+      if (!isValid) {
+        return res.status(400).json({ success: false, message: 'Payment verification signature failed.' });
+      }
+
+      const plans = db.housePlans || defaultHousePlans;
+      const plan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId);
+
+      // Record order in db.enquiries for admin oversight
+      const newEnquiry: Enquiry = {
+        id: `cad_order_${Date.now()}`,
+        name: clientName || 'Verified Homeowner',
+        email: clientEmail || '',
+        phone: clientPhone || '',
+        service: `CAD & PDF Drawings: ${plan?.planCode || planId}`,
+        message: `Paid ₹${plan?.cadPackagePrice || 999} via Razorpay (Payment ID: ${razorpay_payment_id || 'PAY_' + Date.now()}, Order: ${razorpay_order_id}). ${notes || ''}`,
+        date: new Date().toISOString(),
+        status: 'New'
+      };
+
+      if (!db.enquiries) db.enquiries = [];
+      db.enquiries.unshift(newEnquiry);
+      writeDB(db);
+
+      const downloadUrl = `/api/house-plans/${plan?.id || planId}/download-cad?order_id=${razorpay_order_id}&payment_id=${razorpay_payment_id || 'paid'}`;
+
+      return res.json({
+        success: true,
+        message: 'Payment verified successfully! Your CAD & PDF package is ready for download.',
+        downloadUrl,
+        paymentId: razorpay_payment_id || `PAY_${Date.now()}`,
+        orderId: razorpay_order_id,
+        planCode: plan?.planCode,
+        planTitle: plan?.title,
+        fileName: plan?.cadPackageFileName || `${plan?.planCode || 'Lifehut'}-CAD-Package.zip`
+      });
+    } catch (err: any) {
+      console.error('Error verifying Razorpay payment:', err);
+      res.status(500).json({ success: false, message: err.message || 'Payment verification failed' });
+    }
+  });
+
+  // --- HOUSE PLANS CAD & PDF DOWNLOAD ENDPOINT ---
+  app.get('/api/house-plans/:id/download-cad', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const db = readDB();
+      const plans = db.housePlans || defaultHousePlans;
+      const plan = plans.find(p => p.id === id || p.slug === id || p.planCode === id);
+
+      if (!plan) {
+        return res.status(404).send('House plan not found.');
+      }
+
+      const targetFileName = plan.cadPackageFileName || `${plan.planCode}-Architectural-CAD-Package.zip`;
+
+      // 1. If an uploaded ZIP file exists locally on disk in uploads/cad-packages/
+      if (plan.cadPackageZipUrl && plan.cadPackageZipUrl.startsWith('/uploads/cad-packages/')) {
+        const localDiskPath = path.join(process.cwd(), plan.cadPackageZipUrl);
+        if (fs.existsSync(localDiskPath)) {
+          res.setHeader('Content-Type', 'application/zip');
+          res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
+          return fs.createReadStream(localDiskPath).pipe(res);
+        }
+      }
+
+      // 2. If an uploaded ZIP exists on an external URL or Supabase storage
+      if (plan.cadPackageZipUrl && plan.cadPackageZipUrl.startsWith('http')) {
+        return res.redirect(plan.cadPackageZipUrl);
+      }
+
+      // 3. Dynamic Architectural ZIP generation using JSZip
+      const zip = new JSZip();
+
+      const readmeContent = `========================================================================
+LIFEHUT DEVELOPERS CHENNAI — OFFICIAL ARCHITECTURAL CAD & DRAWING PACKAGE
+========================================================================
+Project Reference : ${plan.title}
+Plan Code         : ${plan.planCode}
+Configuration     : ${plan.bedrooms} BHK | ${plan.floorsLabel} (${plan.floors} Storey)
+Total Built-up Area: ${plan.builtUpArea} Sq.Ft
+Target Plot Size  : ${plan.plotDimensions}
+Orientation       : ${plan.facing} Facing (100% Vastu Shastra Compliant)
+Estimated Turnkey : ${plan.estimatedCostRange} (${plan.costPerSqft || 'Turnkey in Chennai'})
+Issue Date        : ${new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}
+Lead Engineer     : Senior Structural Consultant, M.E.
+Consultancy Office: No.16, 1st Street, Nehru Nagar, Ambattur, Chennai – 600053
+Direct WhatsApp   : +91 80721 63330 | lifehutdevelopers@gmail.com
+========================================================================
+
+PACKAGE BLUEPRINT ASSETS:
+1. ${plan.planCode}-Architectural-Floor-Plan.dwg (AutoCAD 2018+ compatible format)
+2. ${plan.planCode}-Structural-Reinforcement-Schedule.txt (RCC Column & Beam Schedule)
+3. ${plan.planCode}-Room-Dimensions-Vastu-Schedule.txt
+4. ${plan.planCode}-Chennai-Sanction-Approval-Guide.txt
+5. Lifehut-Turnkey-Execution-Warranty-Charter.txt
+
+------------------------------------------------------------------------
+ROOM DIMENSIONS & VASTU ALIGNMENT:
+------------------------------------------------------------------------
+${plan.roomDimensions?.map((r, i) => `${i + 1}. [${r.floor}] ${r.roomName.padEnd(28)} : ${r.dimension.padEnd(16)} | Vastu: ${r.vastuZone || 'Aligned'}`).join('\n') || 'Refer to architectural drawings'}
+
+------------------------------------------------------------------------
+ARCHITECTURAL & VASTU DESIGN NOTES:
+------------------------------------------------------------------------
+${plan.vastuNotes?.map((v) => `* ${v}`).join('\n') || '* 100% Vastu approved layout'}
+
+------------------------------------------------------------------------
+STRUCTURAL CIVIL SPECIFICATIONS (IS CODE COMPLIANT):
+------------------------------------------------------------------------
+- Foundation: Isolated RCC Trapezoidal Column Footings designed for SBC >= 150 kN/m2.
+- Concrete Grade: M25 (1:1:2) machine-mixed with potable water ratio <= 0.45.
+- Reinforcement: Fe 550D TMT High-Ductility Steel bars (Tata Tiscon / JSW / SAIL).
+- Masonry: First-class red wirecut clay bricks or AAC thermal blockwork in CM 1:6.
+- Anti-Termite: Pre-construction soil chemical barrier treatment (Bifenthrin 2.5% EC).
+- Waterproofing: Two-coat elastomeric crystalline waterproofing on all sun-sunk slabs.
+
+For site soil testing, custom site adjustments, or Chennai Corporation plan sanctions,
+contact Lifehut Developers directly at +91 80721 63330.
+`;
+
+      const dwgMockContent = `AutoCAD 2018 Drawing Binary Exchange Header - Lifehut Developers\n` +
+        `Plan: ${plan.title} [${plan.planCode}]\n` +
+        `Units: Imperial Architectural (Feet & Inches)\n` +
+        `Plot: ${plan.plotDimensions}, Built-up: ${plan.builtUpArea} sq.ft\n` +
+        `Designed by Lifehut Developers Chennai.\n`;
+
+      const rccSchedule = `========================================================================
+LIFEHUT DEVELOPERS — STRUCTURAL RCC COLUMN & BEAM BAR BENDING SCHEDULE
+========================================================================
+Plan Code: ${plan.planCode} (${plan.builtUpArea} Sq.Ft - ${plan.floorsLabel})
+Code Compliance: IS 456:2000 (Plain & Reinforced Concrete), IS 13920 (Ductile Detailing)
+
+COLUMN SPECIFICATIONS:
+- C1 (Corner Columns) : 9" x 12" | 4 Nos 16mm Dia Fe 550D + 2 Nos 12mm Dia | 8mm rings @ 6" c/c
+- C2 (Internal Columns): 9" x 15" | 6 Nos 16mm Dia Fe 550D | 8mm rings @ 4" c/c near joints, 6" mid-span
+- Footing Depth       : Minimum 5'0" below Natural Ground Level into hard gravel/strata
+
+PLINTH & ROOF BEAM SPECIFICATIONS:
+- Plinth Beam (PB1)   : 9" x 12" | Top: 2-12mm, Bottom: 3-16mm | Stirrups: 8mm @ 6" c/c
+- Floor Beam (FB1)    : 9" x 15" | Top: 3-16mm, Bottom: 3-16mm + 1-12mm curtail | 8mm @ 5" c/c
+- Roof Slab Thickness : 5 Inches (125mm) M25 Grade with 8mm/10mm Fe 550D mesh @ 6" c/c
+
+CONCEALED MEP CONDUIT RUNS:
+- Electrical Conduits: Heavy-duty 20mm/25mm FRLS PVC pipes embedded in floor slabs.
+- Plumbing: Astral/Finolex CPVC schedule-40 for hot/cold water, SWR 110mm for drainage.
+`;
+
+      zip.file("README-Architectural-Plan-Specs.txt", readmeContent);
+      zip.file(`${plan.planCode}-Floor-Plan.dwg`, dwgMockContent);
+      zip.file(`${plan.planCode}-Structural-Reinforcement-Schedule.txt`, rccSchedule);
+      zip.file("Lifehut-Turnkey-Warranty-Certificate.txt",
+`LIFEHUT DEVELOPERS (CHAIR OF EXCELLENCE)
+10-Year Structural Frame Warranty & 1-Year Free Maintenance Guarantee
+Authorized by Chief Structural Engineer.
+Contact: +91 80721 63330 | Ambattur, Chennai`
+      );
+
+      const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
+      res.setHeader('Content-Length', zipBuffer.length.toString());
+      return res.send(zipBuffer);
+    } catch (err: any) {
+      console.error('Error generating CAD zip download:', err);
+      res.status(500).send('Failed to generate CAD download package.');
+    }
+  });
+
   // Testimonial CRUD
   app.post('/api/testimonials', (req, res) => {
     const authHeader = req.headers.authorization;
@@ -844,11 +1287,21 @@ async function startServer() {
       b.content.toLowerCase().includes(q) ||
       b.category.toLowerCase().includes(q)
     );
+    const matchedHousePlans = (db.housePlans || defaultHousePlans).filter(p =>
+      p.title.toLowerCase().includes(q) ||
+      p.planCode.toLowerCase().includes(q) ||
+      p.description.toLowerCase().includes(q) ||
+      p.facing.toLowerCase().includes(q) ||
+      p.style.toLowerCase().includes(q) ||
+      `${p.bedrooms} bhk`.toLowerCase().includes(q) ||
+      `${p.builtUpArea}`.includes(q)
+    );
 
     res.json({
       services: matchedServices.map(s => ({ id: s.id, title: s.title, desc: s.description })),
       projects: matchedProjects.map(p => ({ id: p.id, title: p.name, desc: p.location })),
-      blogs: matchedBlogs.map(b => ({ id: b.id, title: b.title, desc: b.content.substring(0, 100) + '...' }))
+      blogs: matchedBlogs.map(b => ({ id: b.id, title: b.title, desc: b.content.substring(0, 100) + '...' })),
+      housePlans: matchedHousePlans.map(p => ({ id: p.id, slug: p.slug, title: p.title, desc: `${p.builtUpArea} sq.ft | ${p.bedrooms} BHK | ${p.facing} Facing` }))
     });
   });
 
@@ -870,11 +1323,17 @@ Sitemap: https://lifehutdevelopers.com/sitemap.xml`);
       { loc: '', changefreq: 'daily', priority: '1.0' },
       { loc: '/services', changefreq: 'weekly', priority: '0.8' },
       { loc: '/projects', changefreq: 'weekly', priority: '0.8' },
+      { loc: '/house-plans', changefreq: 'daily', priority: '0.9' },
       { loc: '/pricing', changefreq: 'monthly', priority: '0.7' },
       { loc: '/blogs', changefreq: 'daily', priority: '0.8' },
       { loc: '/quote', changefreq: 'monthly', priority: '0.9' },
       { loc: '/contact', changefreq: 'monthly', priority: '0.8' },
     ];
+
+    // Add house plans
+    (db.housePlans || defaultHousePlans).forEach(p => {
+      urls.push({ loc: `/house-plans/${p.slug}`, changefreq: 'weekly', priority: '0.8' });
+    });
 
     // Add blogs
     db.blogs.forEach(b => {

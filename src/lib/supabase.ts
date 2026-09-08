@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Service, Project, Enquiry, QuoteRequest, Settings, Testimonial } from '../types';
+import { Service, Project, Enquiry, QuoteRequest, Settings, Testimonial, HousePlan } from '../types';
 import { defaultProjects } from '../data/defaults';
+import { defaultHousePlans } from '../data/defaultHousePlans';
 
 // Environment variables for Cloudflare / Vite
 const env = ((import.meta as unknown as { env?: Record<string, string> }).env) || {};
@@ -71,6 +72,68 @@ export async function uploadImageToSupabase(file: File, folder: string = 'genera
     return publicUrlData?.publicUrl || null;
   } catch (err) {
     console.warn('Image upload to Supabase storage caught exception, using local fallback:', err);
+    return null;
+  }
+}
+
+// Helper to upload ZIP or CAD drawing files to Supabase Storage bucket 'cms-uploads' or 'cad-packages'
+export async function uploadZipToSupabase(file: File, folder: string = 'cad-packages'): Promise<{ url: string; fileName: string; size: string } | null> {
+  const sizeMb = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
+  
+  if (!supabase || !isSupabaseConfigured()) {
+    console.info('Supabase storage not configured, attempting local server endpoint...');
+    return null;
+  }
+
+  try {
+    const fileExt = file.name.split('.').pop() || 'zip';
+    const cleanBaseName = file.name.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9-_]/g, "-");
+    const fileName = `${folder}/${cleanBaseName}-${Date.now()}.${fileExt}`;
+
+    let { data, error } = await supabase.storage
+      .from('cms-uploads')
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: true
+      });
+
+    if (error && (error.message?.toLowerCase().includes('bucket not found') || (error as any).error === 'Bucket not found')) {
+      try {
+        const { error: createErr } = await supabase.storage.createBucket('cms-uploads', { public: true });
+        if (!createErr) {
+          const retry = await supabase.storage
+            .from('cms-uploads')
+            .upload(fileName, file, {
+              cacheControl: '3600',
+              upsert: true
+            });
+          data = retry.data;
+          error = retry.error;
+        }
+      } catch {
+        // ignore bucket creation error
+      }
+    }
+
+    if (error || !data?.path) {
+      console.warn('Supabase zip upload failed, using fallback:', error?.message || error);
+      return null;
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from('cms-uploads')
+      .getPublicUrl(data.path);
+
+    if (publicUrlData?.publicUrl) {
+      return {
+        url: publicUrlData.publicUrl,
+        fileName: file.name,
+        size: sizeMb
+      };
+    }
+    return null;
+  } catch (err) {
+    console.warn('Zip upload caught exception:', err);
     return null;
   }
 }
@@ -150,8 +213,8 @@ function updateLocalProjectMetadata(id: string, meta: ProjectMetadataItem) {
 }
 
 // Save project tags and metadata into Supabase settings table so it persists across all devices & deploys
-async function persistProjectMetaToSupabase(id: string, meta: ProjectMetadataItem) {
-  if (!supabase) return;
+async function persistProjectMetaToSupabase(id: string, meta: ProjectMetadataItem): Promise<boolean> {
+  if (!supabase) return false;
   try {
     let { data } = await supabase.from('settings').select('stats').limit(1);
     let table = 'settings';
@@ -162,19 +225,30 @@ async function persistProjectMetaToSupabase(id: string, meta: ProjectMetadataIte
     }
 
     const currentStats = (data && data[0] && typeof data[0].stats === 'object') ? data[0].stats : {};
-    const metaMap = currentStats.project_metadata_map || {};
+    const metaMap = { ...(currentStats.project_metadata_map || {}) };
     metaMap[id] = { ...(metaMap[id] || {}), ...meta };
 
-    await supabase.from(table).upsert({
-      id: 'site_settings',
-      stats: {
-        ...currentStats,
-        project_metadata_map: metaMap
-      },
+    const updatedStats = {
+      ...currentStats,
+      project_metadata_map: metaMap
+    };
+
+    const patchRes = await supabase.from(table).update({
+      stats: updatedStats,
       updated_at: new Date().toISOString()
-    });
+    }).eq('id', 'site_settings');
+
+    if (patchRes.error) {
+      await supabase.from(table).upsert({
+        id: 'site_settings',
+        stats: updatedStats,
+        updated_at: new Date().toISOString()
+      });
+    }
+    return true;
   } catch (err) {
     console.warn('Auto meta persistence to Supabase settings:', err);
+    return false;
   }
 }
 
@@ -252,32 +326,87 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
   const remoteMetaMap = await fetchProjectMetaFromSupabase();
   const localMetaMap = getLocalProjectMetadataMap();
 
-  const projectsToAutoBackfill: { id: string; clientName: string; clientTestimonial?: string; clientAvatar?: string }[] = [];
+  const projectsToAutoBackfill: { id: string; clientName: string; clientTestimonial?: string; clientAvatar?: string; tags?: string[]; isRecent?: boolean }[] = [];
 
   const projects = data.map(item => {
+    // 1. Extract embedded metadata from gallery array if present
+    let embeddedMeta: any = {};
+    const cleanGallery: string[] = [];
+    if (Array.isArray(item.gallery)) {
+      for (const g of item.gallery) {
+        if (typeof g === 'object' && g !== null && (g as any).__meta) {
+          embeddedMeta = { ...embeddedMeta, ...(g as any).__meta };
+        } else if (typeof g === 'string') {
+          if (g.startsWith('{') && g.includes('__meta')) {
+            try {
+              const parsed = JSON.parse(g);
+              if (parsed.__meta) {
+                embeddedMeta = { ...embeddedMeta, ...parsed.__meta };
+                continue;
+              }
+            } catch {}
+          }
+          cleanGallery.push(g);
+        }
+      }
+    }
+
+    if (cleanGallery.length === 0 && item.hero_image) {
+      cleanGallery.push(item.hero_image);
+    }
+
     const remoteMeta = remoteMetaMap[item.id] || {};
     const localMeta = localMetaMap[item.id] || {};
     const defaultMatch = defaultProjects.find(dp => dp.id === item.id || dp.name.toLowerCase() === (item.name || '').toLowerCase());
 
-    const isRecentFromDb = item.is_recent ?? item.isRecent;
+    const isRecentFromDb = embeddedMeta.isRecent !== undefined ? embeddedMeta.isRecent : (item.is_recent ?? item.isRecent);
     const isRecent = isRecentFromDb !== undefined 
       ? Boolean(isRecentFromDb) 
       : (remoteMeta.isRecent !== undefined ? Boolean(remoteMeta.isRecent) : (defaultMatch ? Boolean(defaultMatch.isRecent) : true));
 
-    const tags = parseProjectTags(item.tags || item.tag, remoteMeta.tags || localMeta.tags || defaultMatch?.tags, item.name);
+    const rawTags = embeddedMeta.tags || item.tags || item.tag || remoteMeta.tags || localMeta.tags || defaultMatch?.tags;
+    const tags = parseProjectTags(rawTags, undefined, item.name);
 
-    // Resolve clientName with multiple robust fallbacks
-    const clientName = item.client_name || item.clientName || remoteMeta.clientName || localMeta.clientName || defaultMatch?.clientName || '';
-    const clientTestimonial = item.client_testimonial || item.clientTestimonial || remoteMeta.clientTestimonial || localMeta.clientTestimonial || defaultMatch?.clientTestimonial || '';
-    const clientAvatar = item.client_avatar || item.clientAvatar || remoteMeta.clientAvatar || localMeta.clientAvatar || (clientName ? clientName.split(' ').map((s: string) => s[0]).join('').slice(0, 2).toUpperCase() : 'LH');
+    // Resolve clientName with multiple robust fallbacks:
+    // 1. Direct row column item.client_name
+    // 2. Embedded gallery meta embeddedMeta.clientName
+    // 3. Settings table project_metadata_map remoteMeta.clientName
+    // 4. Local storage metadata
+    // 5. Default projects match
+    const clientName = (item.client_name && item.client_name.trim())
+      || (embeddedMeta.clientName && embeddedMeta.clientName.trim())
+      || (item.clientName && item.clientName.trim())
+      || remoteMeta.clientName
+      || localMeta.clientName
+      || defaultMatch?.clientName
+      || '';
 
-    // If client_name in Supabase row is empty, schedule silent background update to Supabase
-    if ((!item.client_name || item.client_name.trim() === '') && clientName) {
+    const clientTestimonial = (item.client_testimonial && item.client_testimonial.trim())
+      || (embeddedMeta.clientTestimonial && embeddedMeta.clientTestimonial.trim())
+      || (item.clientTestimonial && item.clientTestimonial.trim())
+      || remoteMeta.clientTestimonial
+      || localMeta.clientTestimonial
+      || defaultMatch?.clientTestimonial
+      || '';
+
+    const clientAvatar = item.client_avatar
+      || embeddedMeta.clientAvatar
+      || item.clientAvatar
+      || remoteMeta.clientAvatar
+      || localMeta.clientAvatar
+      || (clientName ? clientName.split(' ').map((s: string) => s[0]).join('').slice(0, 2).toUpperCase() : 'LH');
+
+    // If client_name or gallery metadata is missing on the Supabase row, schedule silent background update
+    const missingClientNameInDb = !item.client_name || item.client_name.trim() === '';
+    const missingEmbeddedMeta = !embeddedMeta.tags || embeddedMeta.tags.length === 0;
+    if ((missingClientNameInDb && clientName) || missingEmbeddedMeta) {
       projectsToAutoBackfill.push({
         id: item.id,
         clientName,
         clientTestimonial,
-        clientAvatar
+        clientAvatar,
+        tags,
+        isRecent
       });
     }
 
@@ -285,7 +414,7 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
       id: item.id,
       name: item.name,
       heroImage: item.hero_image || item.heroImage || '',
-      gallery: Array.isArray(item.gallery) && item.gallery.length > 0 ? item.gallery : (item.hero_image ? [item.hero_image] : []),
+      gallery: cleanGallery,
       completionDate: item.completion_date || item.completionDate || '',
       plotSize: item.plot_size || item.plotSize || '',
       builtUpArea: item.built_up_area || item.builtUpArea || '',
@@ -302,16 +431,34 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
     };
   });
 
-  // Auto-backfill any empty client_name fields in Supabase in background
+  // Auto-backfill empty client_name and tags metadata in Supabase in background
   if (projectsToAutoBackfill.length > 0) {
     setTimeout(async () => {
       for (const p of projectsToAutoBackfill) {
         try {
-          await supabase.from('projects').update({
-            client_name: p.clientName,
-            client_testimonial: p.clientTestimonial || null,
-            client_avatar: p.clientAvatar || 'LH'
-          }).eq('id', p.id);
+          const updatePayload: Record<string, any> = {};
+          if (p.clientName) {
+            updatePayload.client_name = p.clientName;
+          }
+          if (p.clientTestimonial) {
+            updatePayload.client_testimonial = p.clientTestimonial;
+          }
+          if (p.clientAvatar) {
+            updatePayload.client_avatar = p.clientAvatar;
+          }
+
+          // Fetch current gallery and embed metadata
+          const { data: row } = await supabase.from('projects').select('gallery, hero_image').eq('id', p.id).single();
+          if (row) {
+            const rawG = Array.isArray(row.gallery) ? row.gallery : (row.hero_image ? [row.hero_image] : []);
+            const clean = rawG.filter((g: any) => typeof g === 'string' && !g.includes('__meta') && (g.startsWith('http') || g.startsWith('/')));
+            updatePayload.gallery = [
+              ...clean,
+              { __meta: { tags: p.tags, isRecent: p.isRecent, clientName: p.clientName, clientAvatar: p.clientAvatar } }
+            ];
+          }
+
+          await supabase.from('projects').update(updatePayload).eq('id', p.id);
         } catch {
           // Silent fallback
         }
@@ -325,29 +472,37 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
 export async function saveSupabaseProject(project: Project): Promise<boolean> {
   if (!supabase) return false;
 
-  // Persist locally for instant responsiveness
-  updateLocalProjectMetadata(project.id, {
-    tags: project.tags || [],
+  const metaData: ProjectMetadataItem = {
+    tags: Array.isArray(project.tags) && project.tags.length > 0 ? project.tags : ['Independent Villa'],
     clientName: project.clientName || '',
-    clientAvatar: project.clientAvatar || '',
+    clientAvatar: project.clientAvatar || (project.clientName ? project.clientName.split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase() : 'LH'),
     clientTestimonial: project.clientTestimonial || '',
     isRecent: Boolean(project.isRecent)
-  });
+  };
 
-  // Persist metadata to Supabase settings in background so tags persist across deploys
-  persistProjectMetaToSupabase(project.id, {
-    tags: project.tags || [],
-    clientName: project.clientName || '',
-    clientAvatar: project.clientAvatar || '',
-    clientTestimonial: project.clientTestimonial || '',
-    isRecent: Boolean(project.isRecent)
-  });
+  // 1. Persist locally for instant responsiveness
+  updateLocalProjectMetadata(project.id, metaData);
+
+  // 2. Persist metadata to Supabase settings stats.project_metadata_map (awaited for absolute certainty)
+  await persistProjectMetaToSupabase(project.id, metaData);
+
+  // 3. Prepare gallery array with embedded metadata object for guaranteed persistence in project's own row
+  const rawGallery = Array.isArray(project.gallery) && project.gallery.length > 0 ? project.gallery : [project.heroImage];
+  const cleanImageStrings = rawGallery.filter(g => typeof g === 'string' && !g.includes('__meta') && (g.startsWith('http') || g.startsWith('/')));
+  if (cleanImageStrings.length === 0 && project.heroImage) {
+    cleanImageStrings.push(project.heroImage);
+  }
+
+  const enhancedGallery = [
+    ...cleanImageStrings,
+    { __meta: metaData }
+  ];
 
   const fullPayload: Record<string, any> = {
     id: project.id,
     name: project.name,
     hero_image: project.heroImage,
-    gallery: Array.isArray(project.gallery) && project.gallery.length > 0 ? project.gallery : [project.heroImage],
+    gallery: enhancedGallery,
     completion_date: project.completionDate,
     plot_size: project.plotSize || project.builtUpArea || '',
     built_up_area: project.builtUpArea || project.plotSize || '',
@@ -356,10 +511,10 @@ export async function saveSupabaseProject(project: Project): Promise<boolean> {
     budget: project.budget || '',
     location: project.location || '',
     client_name: project.clientName ? project.clientName.trim() : null,
-    client_avatar: project.clientAvatar || (project.clientName ? project.clientName.split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase() : 'LH'),
-    client_testimonial: project.clientTestimonial ? project.clientTestimonial.trim() : null,
+    client_avatar: metaData.clientAvatar,
+    client_testimonial: metaData.clientTestimonial || null,
     status: project.status || 'Completed',
-    tags: Array.isArray(project.tags) && project.tags.length > 0 ? project.tags : ['Independent Villa'],
+    tags: metaData.tags,
     is_recent: Boolean(project.isRecent)
   };
 
@@ -411,6 +566,15 @@ export async function saveSupabaseProject(project: Project): Promise<boolean> {
       break;
     }
   }
+
+  // 4. Update Express backend if available
+  try {
+    await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upsert', project: { ...project, ...metaData } })
+    });
+  } catch {}
 
   return success;
 }
@@ -551,6 +715,24 @@ export async function fetchSupabaseSettings(): Promise<Settings | null> {
 
 export async function saveSupabaseSettings(settings: Settings): Promise<boolean> {
   if (!supabase) return false;
+
+  // Retrieve existing stats so we preserve project_metadata_map and house_plans
+  let existingStats: any = {};
+  try {
+    let res = await supabase.from('settings').select('stats').limit(1);
+    if (res.error || !res.data || res.data.length === 0) {
+      res = await supabase.from('site_settings').select('stats').limit(1);
+    }
+    if (res.data && res.data[0]?.stats && typeof res.data[0].stats === 'object') {
+      existingStats = res.data[0].stats;
+    }
+  } catch {}
+
+  const mergedStats = {
+    ...existingStats,
+    ...(settings.stats || {})
+  };
+
   const payload = {
     id: 'site_settings',
     hero_title: settings.heroTitle,
@@ -569,7 +751,7 @@ export async function saveSupabaseSettings(settings: Settings): Promise<boolean>
     seo_title: settings.seoTitle,
     seo_description: settings.seoDescription,
     seo_keywords: settings.seoKeywords,
-    stats: settings.stats,
+    stats: mergedStats,
     updated_at: new Date().toISOString()
   };
 
@@ -611,3 +793,389 @@ export async function saveSupabaseTestimonial(testimonial: Testimonial): Promise
   if (error) console.error('Error saving testimonial to Supabase:', error);
   return !error;
 }
+
+// --- HOUSE PLANS DB HELPERS ---
+const LOCAL_HOUSE_PLANS_KEY = 'lifehut_local_house_plans';
+
+export async function fetchSupabaseHousePlans(): Promise<HousePlan[] | null> {
+  // 1. Check localStorage first for instant caching & offline access
+  let cachedPlans: HousePlan[] | null = null;
+  try {
+    const raw = localStorage.getItem(LOCAL_HOUSE_PLANS_KEY);
+    if (raw) {
+      cachedPlans = JSON.parse(raw);
+    }
+  } catch {
+    // ignore local parse errors
+  }
+
+  // 2. Try fetching from Supabase table 'house_plans'
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('house_plans')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && data && data.length > 0) {
+        const plans: HousePlan[] = data.map(item => ({
+          id: item.id,
+          planCode: item.plan_code || item.planCode || 'LH-HP-000',
+          title: item.title,
+          slug: item.slug,
+          floors: Number(item.floors) || 1,
+          floorsLabel: item.floors_label || item.floorsLabel || `${item.floors || 1} Storey`,
+          bedrooms: Number(item.bedrooms) || 3,
+          bathrooms: Number(item.bathrooms) || 3,
+          builtUpArea: Number(item.built_up_area || item.builtUpArea) || 1500,
+          plotDimensions: item.plot_dimensions || item.plotDimensions || "30' x 50'",
+          buildingDimensions: item.building_dimensions || item.buildingDimensions || undefined,
+          facing: item.facing || 'East',
+          vastuCompliant: item.vastu_compliant !== undefined ? Boolean(item.vastu_compliant) : true,
+          vastuScore: item.vastu_score || item.vastuScore || '100% Vastu Compliant',
+          vastuNotes: Array.isArray(item.vastu_notes || item.vastuNotes) ? (item.vastu_notes || item.vastuNotes) : [],
+          style: item.style || 'Contemporary Modern',
+          carParking: Number(item.car_parking || item.carParking) || 1,
+          estimatedCostRange: item.estimated_cost_range || item.estimatedCostRange || '₹30L - ₹35L',
+          costPerSqft: item.cost_per_sqft || item.costPerSqft || '₹2,200 / sq.ft',
+          elevationImage: item.elevation_image || item.elevationImage || '',
+          floorPlanImage: item.floor_plan_image || item.floorPlanImage || '',
+          galleryImages: Array.isArray(item.gallery_images || item.galleryImages) ? (item.gallery_images || item.galleryImages) : [],
+          description: item.description || '',
+          roomDimensions: Array.isArray(item.room_dimensions || item.roomDimensions) ? (item.room_dimensions || item.roomDimensions) : [],
+          features: Array.isArray(item.features) ? item.features : [],
+          cadPackageZipUrl: item.cad_package_zip_url || item.cadPackageZipUrl || '',
+          cadPackageFileName: item.cad_package_file_name || item.cadPackageFileName || '',
+          cadPackageSize: item.cad_package_size || item.cadPackageSize || '',
+          cadPackagePrice: item.cad_package_price !== undefined ? Number(item.cad_package_price) : (item.cadPackagePrice !== undefined ? Number(item.cadPackagePrice) : 999),
+          cadPackageIncludes: Array.isArray(item.cad_package_includes || item.cadPackageIncludes) ? (item.cad_package_includes || item.cadPackageIncludes) : undefined,
+          seoMeta: item.seo_meta || item.seoMeta || undefined,
+          isFeatured: Boolean(item.is_featured || item.isFeatured),
+          isActive: item.is_active !== undefined ? Boolean(item.is_active) : true,
+          createdAt: item.created_at || item.createdAt
+        }));
+
+        try {
+          localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(plans));
+        } catch {
+          // ignore storage quota
+        }
+        return plans;
+      }
+
+      // If 'house_plans' table does not exist or empty, check site_settings.stats.house_plans fallback
+      let settingsRes = await supabase.from('settings').select('*').limit(1);
+      if (settingsRes.error || !settingsRes.data || settingsRes.data.length === 0) {
+        settingsRes = await supabase.from('site_settings').select('*').limit(1);
+      }
+      if (!settingsRes.error && settingsRes.data && settingsRes.data[0]?.stats?.house_plans) {
+        const storedPlans = settingsRes.data[0].stats.house_plans;
+        if (Array.isArray(storedPlans) && storedPlans.length > 0) {
+          try {
+            localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(storedPlans));
+          } catch {
+            // ignore
+          }
+          return storedPlans;
+        }
+      }
+    } catch (err) {
+      console.warn('Error querying Supabase for house plans, checking local/server fallback:', err);
+    }
+  }
+
+  // 3. Fallback to Express server API
+  try {
+    const res = await fetch('/api/house-plans');
+    if (res.ok) {
+      const serverPlans = await res.json();
+      if (Array.isArray(serverPlans) && serverPlans.length > 0) {
+        try {
+          localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(serverPlans));
+        } catch {
+          // ignore
+        }
+        return serverPlans;
+      }
+    }
+  } catch {
+    // server unreachable or running in static export
+  }
+
+  // 4. Return cached or default plans
+  return cachedPlans && cachedPlans.length > 0 ? cachedPlans : defaultHousePlans;
+}
+
+export async function saveSupabaseHousePlan(plan: HousePlan): Promise<boolean> {
+  // Update local storage immediately for fast UI feedback
+  try {
+    const current = (await fetchSupabaseHousePlans()) || defaultHousePlans;
+    const existsIndex = current.findIndex(p => p.id === plan.id || p.slug === plan.slug);
+    let updated: HousePlan[];
+    if (existsIndex >= 0) {
+      updated = [...current];
+      updated[existsIndex] = plan;
+    } else {
+      updated = [plan, ...current];
+    }
+    localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.warn('Failed to update local house plans cache:', e);
+  }
+
+  // Update Express server in background
+  try {
+    fetch('/api/house-plans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upsert', plan })
+    }).catch(() => {});
+  } catch {
+    // ignore
+  }
+
+  if (!supabase) return true;
+
+  // Attempt direct upsert to Supabase 'house_plans'
+  const payload = {
+    id: plan.id,
+    plan_code: plan.planCode,
+    title: plan.title,
+    slug: plan.slug,
+    floors: plan.floors,
+    floors_label: plan.floorsLabel,
+    bedrooms: plan.bedrooms,
+    bathrooms: plan.bathrooms,
+    built_up_area: plan.builtUpArea,
+    plot_dimensions: plan.plotDimensions,
+    building_dimensions: plan.buildingDimensions,
+    facing: plan.facing,
+    vastu_compliant: plan.vastuCompliant,
+    vastu_score: plan.vastuScore,
+    vastu_notes: plan.vastuNotes,
+    style: plan.style,
+    car_parking: plan.carParking,
+    estimated_cost_range: plan.estimatedCostRange,
+    cost_per_sqft: plan.costPerSqft,
+    elevation_image: plan.elevationImage,
+    floor_plan_image: plan.floorPlanImage,
+    gallery_images: plan.galleryImages,
+    description: plan.description,
+    room_dimensions: plan.roomDimensions,
+    features: plan.features,
+    cad_package_zip_url: plan.cadPackageZipUrl || '',
+    cad_package_file_name: plan.cadPackageFileName || '',
+    cad_package_size: plan.cadPackageSize || '',
+    cad_package_price: plan.cadPackagePrice || 999,
+    cad_package_includes: plan.cadPackageIncludes || [],
+    seo_meta: plan.seoMeta,
+    is_featured: plan.isFeatured,
+    is_active: plan.isActive,
+    updated_at: new Date().toISOString()
+  };
+
+  const { error } = await supabase.from('house_plans').upsert(payload);
+  if (error) {
+    console.warn('Direct house_plans upsert failed (table may not exist yet), saving to site_settings fallback:', error.message);
+    // Seamless fallback to site_settings table
+    try {
+      let res = await supabase.from('settings').select('*').limit(1);
+      let targetTable = 'settings';
+      if (res.error || !res.data || res.data.length === 0) {
+        res = await supabase.from('site_settings').select('*').limit(1);
+        targetTable = 'site_settings';
+      }
+      if (res.data && res.data.length > 0) {
+        const row = res.data[0];
+        const existingPlans: HousePlan[] = Array.isArray(row.stats?.house_plans) ? row.stats.house_plans : [...defaultHousePlans];
+        const idx = existingPlans.findIndex(p => p.id === plan.id || p.slug === plan.slug);
+        if (idx >= 0) {
+          existingPlans[idx] = plan;
+        } else {
+          existingPlans.unshift(plan);
+        }
+        const updatedStats = { ...row.stats, house_plans: existingPlans };
+        await supabase.from(targetTable).upsert({ ...row, stats: updatedStats, updated_at: new Date().toISOString() });
+      }
+    } catch (fallbackErr) {
+      console.warn('Fallback settings save for house plan caught error:', fallbackErr);
+    }
+  }
+
+  return true;
+}
+
+export async function deleteSupabaseHousePlan(id: string): Promise<boolean> {
+  // Update local storage
+  try {
+    const raw = localStorage.getItem(LOCAL_HOUSE_PLANS_KEY);
+    if (raw) {
+      const plans: HousePlan[] = JSON.parse(raw);
+      const filtered = plans.filter(p => p.id !== id);
+      localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(filtered));
+    }
+  } catch (e) {
+    console.warn('Failed to update local house plans cache on delete:', e);
+  }
+
+  // Update Express server
+  try {
+    fetch(`/api/house-plans/${id}`, { method: 'DELETE' }).catch(() => {});
+  } catch {
+    // ignore
+  }
+
+  if (!supabase) return true;
+
+  try {
+    const { error } = await supabase.from('house_plans').delete().eq('id', id);
+    if (error) {
+      // Also clean up from site_settings fallback
+      let res = await supabase.from('settings').select('*').limit(1);
+      let targetTable = 'settings';
+      if (res.error || !res.data || res.data.length === 0) {
+        res = await supabase.from('site_settings').select('*').limit(1);
+        targetTable = 'site_settings';
+      }
+      if (res.data && res.data.length > 0) {
+        const row = res.data[0];
+        if (row.stats?.house_plans && Array.isArray(row.stats.house_plans)) {
+          const filtered = row.stats.house_plans.filter((p: HousePlan) => p.id !== id);
+          await supabase.from(targetTable).upsert({ ...row, stats: { ...row.stats, house_plans: filtered } });
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return true;
+}
+
+/**
+ * Purely code-driven silent auto-sync & migration.
+ * Runs on app initialization in the background without needing any buttons in the Admin UI.
+ * Ensures:
+ * 1. Project metadata (tags, client_name, is_recent) is permanently embedded into Supabase project records and settings.
+ * 2. Site settings stats contain project_metadata_map and house_plans catalog.
+ * 3. Client names and tags survive all browser clears, deploys, and device switches.
+ */
+export async function autoMigrateAndSyncSupabase(): Promise<void> {
+  if (!supabase) return;
+
+  try {
+    // 1. Fetch current settings row
+    let res = await supabase.from('settings').select('*').limit(1);
+    let table = 'settings';
+    if (res.error || !res.data || res.data.length === 0) {
+      res = await supabase.from('site_settings').select('*').limit(1);
+      table = 'site_settings';
+    }
+
+    const settingsRow = res.data && res.data.length > 0 ? res.data[0] : null;
+    const currentStats = (settingsRow && typeof settingsRow.stats === 'object') ? settingsRow.stats : {};
+    const remoteMetaMap = { ...(currentStats.project_metadata_map || {}) };
+
+    // 2. Fetch all projects from Supabase
+    const { data: projectsData, error: projErr } = await supabase.from('projects').select('*');
+    if (projErr || !projectsData) return;
+
+    let hasStatsUpdate = false;
+
+    // 3. Process each project
+    for (const p of projectsData) {
+      const existingMeta = remoteMetaMap[p.id] || {};
+      const defaultMatch = defaultProjects.find(dp => dp.id === p.id || dp.name.toLowerCase() === (p.name || '').toLowerCase());
+
+      // Parse tags
+      const rawTags = existingMeta.tags || p.tags || p.tag || defaultMatch?.tags;
+      const tags = parseProjectTags(rawTags, undefined, p.name);
+
+      const clientName = (p.client_name && p.client_name.trim())
+        || (existingMeta.clientName && existingMeta.clientName.trim())
+        || defaultMatch?.clientName
+        || '';
+
+      const clientAvatar = p.client_avatar
+        || existingMeta.clientAvatar
+        || (clientName ? clientName.split(' ').map((s: string) => s[0]).join('').slice(0, 2).toUpperCase() : 'LH');
+
+      const isRecent = existingMeta.isRecent !== undefined
+        ? Boolean(existingMeta.isRecent)
+        : (p.is_recent !== undefined ? Boolean(p.is_recent) : true);
+
+      // Check if gallery has __meta embedded
+      let hasEmbedded = false;
+      if (Array.isArray(p.gallery)) {
+        for (const g of p.gallery) {
+          if ((typeof g === 'object' && g?.__meta) || (typeof g === 'string' && g.includes('__meta'))) {
+            hasEmbedded = true;
+            break;
+          }
+        }
+      }
+
+      // If gallery doesn't have metadata embedded OR client_name is empty in row, update Supabase row
+      if (!hasEmbedded || (!p.client_name && clientName)) {
+        const rawG = Array.isArray(p.gallery) ? p.gallery : (p.hero_image ? [p.hero_image] : []);
+        const cleanG = rawG.filter((g: any) => typeof g === 'string' && !g.includes('__meta') && (g.startsWith('http') || g.startsWith('/')));
+        if (cleanG.length === 0 && p.hero_image) {
+          cleanG.push(p.hero_image);
+        }
+
+        const newGallery = [
+          ...cleanG,
+          { __meta: { tags, isRecent, clientName, clientAvatar } }
+        ];
+
+        const updatePayload: Record<string, any> = {
+          gallery: newGallery
+        };
+        if (clientName && (!p.client_name || p.client_name.trim() === '')) {
+          updatePayload.client_name = clientName;
+        }
+        if (clientAvatar && !p.client_avatar) {
+          updatePayload.client_avatar = clientAvatar;
+        }
+
+        await supabase.from('projects').update(updatePayload).eq('id', p.id);
+      }
+
+      // Ensure remoteMetaMap in settings has this project's tags and client info
+      if (!remoteMetaMap[p.id] || !remoteMetaMap[p.id].tags || remoteMetaMap[p.id].tags.length === 0) {
+        remoteMetaMap[p.id] = {
+          tags,
+          clientName,
+          clientAvatar,
+          isRecent
+        };
+        hasStatsUpdate = true;
+      }
+    }
+
+    // 4. If settings stats need sync, save them
+    if (hasStatsUpdate || !currentStats.house_plans || currentStats.house_plans.length === 0) {
+      const mergedStats = {
+        ...currentStats,
+        project_metadata_map: remoteMetaMap,
+        house_plans: (currentStats.house_plans && currentStats.house_plans.length > 0) ? currentStats.house_plans : defaultHousePlans
+      };
+
+      if (settingsRow) {
+        await supabase.from(table).update({
+          stats: mergedStats,
+          updated_at: new Date().toISOString()
+        }).eq('id', settingsRow.id);
+      } else {
+        await supabase.from('settings').upsert({
+          id: 'site_settings',
+          stats: mergedStats,
+          updated_at: new Date().toISOString()
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Silent code migration in background completed with notice:', e);
+  }
+}
+

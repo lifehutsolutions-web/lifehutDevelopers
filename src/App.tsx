@@ -9,16 +9,20 @@ import { Pricing } from './components/Pricing';
 import { Blogs } from './components/Blogs';
 import { QuoteForm } from './components/QuoteForm';
 import { Contact } from './components/Contact';
+import { HousePlans } from './components/HousePlans';
 import { AdminPanel } from './components/AdminPanel';
 import { FloatingQuickActions } from './components/FloatingQuickActions';
-import { Service, Project, Blog, Enquiry, Settings } from './types';
+import { Service, Project, Blog, Enquiry, Settings, HousePlan } from './types';
 import { defaultServices, defaultProjects, defaultBlogs, defaultSettings } from './data/defaults';
+import { defaultHousePlans } from './data/defaultHousePlans';
 import { 
   isSupabaseConfigured, 
   fetchSupabaseServices, 
   fetchSupabaseProjects, 
   fetchSupabaseEnquiries, 
-  fetchSupabaseSettings 
+  fetchSupabaseSettings,
+  fetchSupabaseHousePlans,
+  autoMigrateAndSyncSupabase
 } from './lib/supabase';
 import { ShieldCheck, HardHat, Award, Check, ChevronRight, Sliders, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -34,6 +38,8 @@ export default function App() {
   const [services, setServices] = useState<Service[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [blogs, setBlogs] = useState<Blog[]>([]);
+  const [housePlans, setHousePlans] = useState<HousePlan[]>([]);
+  const [selectedPlanSlug, setSelectedPlanSlug] = useState<string | null>(null);
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,11 +49,12 @@ export default function App() {
   const refreshAllData = async () => {
     try {
       if (isSupabaseConfigured()) {
-        const [sbServices, sbProjects, sbEnquiries, sbSettings] = await Promise.all([
+        const [sbServices, sbProjects, sbEnquiries, sbSettings, sbHousePlans] = await Promise.all([
           fetchSupabaseServices(),
           fetchSupabaseProjects(),
           fetchSupabaseEnquiries(),
-          fetchSupabaseSettings()
+          fetchSupabaseSettings(),
+          fetchSupabaseHousePlans()
         ]);
 
         let blogData: Blog[] = [];
@@ -62,18 +69,25 @@ export default function App() {
         setServices(sbServices && sbServices.length > 0 ? sbServices : defaultServices);
         setProjects(sbProjects && sbProjects.length > 0 ? sbProjects : defaultProjects);
         setBlogs(blogData && blogData.length > 0 ? blogData : defaultBlogs);
+        setHousePlans(sbHousePlans && sbHousePlans.length > 0 ? sbHousePlans : defaultHousePlans);
         setEnquiries(sbEnquiries || []);
         setSettings(sbSettings || defaultSettings);
         setLoading(false);
+
+        // Run silent code-driven migration and synchronization in background without any UI disruption
+        setTimeout(() => {
+          autoMigrateAndSyncSupabase().catch(() => {});
+        }, 800);
         return;
       }
 
-      const [servicesRes, projectsRes, blogsRes, enquiriesRes, settingsRes] = await Promise.all([
+      const [servicesRes, projectsRes, blogsRes, enquiriesRes, settingsRes, housePlansRes] = await Promise.all([
         fetch('/api/services').catch(() => null),
         fetch('/api/projects').catch(() => null),
         fetch('/api/blogs').catch(() => null),
         fetch('/api/enquiries').catch(() => null),
         fetch('/api/settings').catch(() => null),
+        fetch('/api/house-plans').catch(() => null),
       ]);
 
       if (servicesRes && servicesRes.ok) {
@@ -100,6 +114,14 @@ export default function App() {
         setBlogs(local ? JSON.parse(local) : defaultBlogs);
       }
 
+      if (housePlansRes && housePlansRes.ok) {
+        const hpData = await housePlansRes.json();
+        setHousePlans(hpData.length > 0 ? hpData : defaultHousePlans);
+      } else {
+        const local = localStorage.getItem('lifehut_local_house_plans');
+        setHousePlans(local ? JSON.parse(local) : defaultHousePlans);
+      }
+
       if (enquiriesRes && enquiriesRes.ok) {
         const eData = await enquiriesRes.json();
         setEnquiries(eData || []);
@@ -123,12 +145,14 @@ export default function App() {
       const localServices = localStorage.getItem('lifehut_local_services');
       const localProjects = localStorage.getItem('lifehut_local_projects');
       const localBlogs = localStorage.getItem('lifehut_local_blogs');
+      const localHousePlans = localStorage.getItem('lifehut_local_house_plans');
       const localSettings = localStorage.getItem('lifehut_local_settings');
       const localEnquiries = localStorage.getItem('lifehut_local_enquiries');
 
       setServices(localServices ? JSON.parse(localServices) : defaultServices);
       setProjects(localProjects ? JSON.parse(localProjects) : defaultProjects);
       setBlogs(localBlogs ? JSON.parse(localBlogs) : defaultBlogs);
+      setHousePlans(localHousePlans ? JSON.parse(localHousePlans) : defaultHousePlans);
       setSettings(localSettings ? JSON.parse(localSettings) : defaultSettings);
       setEnquiries(localEnquiries ? JSON.parse(localEnquiries) : []);
       setLoading(false);
@@ -140,14 +164,46 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const handleHashChange = () => {
-      if (window.location.hash === '#admin') {
+    const handleUrlRoute = () => {
+      const pathname = window.location.pathname;
+      const hash = window.location.hash;
+
+      if (hash === '#admin') {
         setActiveTab('admin');
+      } else if (pathname === '/house-plans' || pathname.startsWith('/house-plans/')) {
+        setActiveTab('house-plans');
+        const parts = pathname.split('/').filter(Boolean);
+        if (parts.length > 1 && parts[1]) {
+          setSelectedPlanSlug(parts[1]);
+        } else {
+          setSelectedPlanSlug(null);
+        }
       }
     };
-    handleHashChange();
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+
+    handleUrlRoute();
+    window.addEventListener('popstate', handleUrlRoute);
+    window.addEventListener('hashchange', handleUrlRoute);
+
+    const handleCustomNavPlan = (e: any) => {
+      setActiveTab('house-plans');
+      if (e.detail) {
+        setSelectedPlanSlug(e.detail);
+        window.history.pushState({}, '', `/house-plans/${e.detail}`);
+      } else {
+        setSelectedPlanSlug(null);
+        window.history.pushState({}, '', '/house-plans');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    window.addEventListener('nav-house-plan', handleCustomNavPlan);
+
+    return () => {
+      window.removeEventListener('popstate', handleUrlRoute);
+      window.removeEventListener('hashchange', handleUrlRoute);
+      window.removeEventListener('nav-house-plan', handleCustomNavPlan);
+    };
   }, []);
 
   const handleAdminLogin = () => {
@@ -169,6 +225,8 @@ export default function App() {
   const email = settings?.email || "lifehutdevelopers@gmail.com";
   const instagramUrl = settings?.instagramUrl || "https://www.instagram.com/lifehut_developers/";
   const pinterestUrl = settings?.pinterestUrl || "https://in.pinterest.com/lifehutdevelopers/";
+  const youtubeUrl = settings?.youtubeUrl || "https://www.youtube.com/@lifehutdevelopers";
+  const facebookUrl = settings?.facebookUrl || "https://facebook.com/lifehutdevelopers";
 
   const stats = {
     projectsDone: settings?.stats?.projectsDone || "120",
@@ -197,6 +255,26 @@ export default function App() {
           title={settings?.seoTitle || "Top Residential Building Construction Company in Chennai | Lifehut Developers"}
           description={settings?.seoDescription || "Leading residential building construction company in Chennai offering turnkey villa construction, transparent packages, and on-time handover."}
           keywords={settings?.seoKeywords || "residential building construction company, turnkey house builders chennai, villa contractors"}
+        />
+      )}
+      {activeTab === 'house-plans' && (
+        <SEO
+          title={
+            selectedPlanSlug && housePlans.find(p => p.slug === selectedPlanSlug)
+              ? `${housePlans.find(p => p.slug === selectedPlanSlug)?.title} | Turnkey House Plans`
+              : "House Plans in Chennai | 100% Vastu Architectural Floor Designs"
+          }
+          description={
+            selectedPlanSlug && housePlans.find(p => p.slug === selectedPlanSlug)
+              ? `${housePlans.find(p => p.slug === selectedPlanSlug)?.description}`
+              : "Explore architect-drafted house plans in Chennai. 1500 sq.ft, 1800 sq.ft, duplex villa floor plans, 100% Vastu compliant with estimated turnkey construction budgets."
+          }
+          keywords={
+            selectedPlanSlug && housePlans.find(p => p.slug === selectedPlanSlug)
+              ? `${housePlans.find(p => p.slug === selectedPlanSlug)?.seoMeta?.keywords || "house plans chennai"}`
+              : "house plans chennai, 1500 sqft house plan, 1 storey house design, duplex floor plan chennai, vastu house plans"
+          }
+          canonicalPath={selectedPlanSlug ? `/house-plans/${selectedPlanSlug}` : "/house-plans"}
         />
       )}
       {activeTab === 'services' && (
@@ -280,6 +358,23 @@ export default function App() {
           )}
 
           {/* Dynamic Views */}
+          {activeTab === 'house-plans' && (
+            <motion.div
+              key="house-plans"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3 }}
+            >
+              <HousePlans
+                housePlans={housePlans}
+                setActiveTab={setActiveTab}
+                initialSelectedSlug={selectedPlanSlug}
+                phone={phone}
+              />
+            </motion.div>
+          )}
+
           {activeTab === 'services' && (
             <motion.div
               key="services"
@@ -383,6 +478,7 @@ export default function App() {
                 services={services}
                 projects={projects}
                 blogs={blogs}
+                housePlans={housePlans}
                 enquiries={enquiries}
                 settings={settings}
                 refreshAllData={refreshAllData}
@@ -402,6 +498,8 @@ export default function App() {
         email={email}
         instagramUrl={instagramUrl}
         pinterestUrl={pinterestUrl}
+        youtubeUrl={youtubeUrl}
+        facebookUrl={facebookUrl}
       />
 
       {/* Floating Quick Actions (WhatsApp, Phone Call, Instant Quote & Scroll-to-top) */}

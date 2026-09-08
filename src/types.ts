@@ -98,6 +98,55 @@ export interface QuoteRequest {
   status: 'New' | 'Processed' | 'Archived';
 }
 
+export interface RoomDimension {
+  roomName: string;
+  dimension: string;
+  floor: string;
+  vastuZone?: string;
+}
+
+export interface HousePlan {
+  id: string;
+  planCode: string;
+  title: string;
+  slug: string;
+  floors: number;
+  floorsLabel: string;
+  bedrooms: number;
+  bathrooms: number;
+  builtUpArea: number;
+  plotDimensions: string;
+  buildingDimensions?: string;
+  facing: 'East' | 'North' | 'South' | 'West';
+  vastuCompliant: boolean;
+  vastuScore?: string;
+  vastuNotes?: string[];
+  style: string;
+  carParking: number;
+  estimatedCostRange: string;
+  costPerSqft?: string;
+  elevationImage: string;
+  floorPlanImage: string;
+  galleryImages?: string[];
+  description: string;
+  roomDimensions: RoomDimension[];
+  features: string[];
+  // Full CAD & PDF Blueprint Package
+  cadPackageZipUrl?: string;
+  cadPackageFileName?: string;
+  cadPackageSize?: string;
+  cadPackagePrice?: number;
+  cadPackageIncludes?: string[];
+  seoMeta?: {
+    title: string;
+    description: string;
+    keywords: string;
+  };
+  isFeatured?: boolean;
+  isActive?: boolean;
+  createdAt?: string;
+}
+
 export interface SiteSettings {
   heroTitle: string;
   heroSubtitle: string;
@@ -116,12 +165,17 @@ export interface SiteSettings {
   seoDescription: string;
   seoKeywords: string;
   stats?: Stats;
+  // Razorpay Gateway Settings
+  razorpayKeyId?: string;
+  razorpayKeySecret?: string;
+  razorpayEnabled?: boolean;
 }
 
 export interface CMSData {
   services: Service[];
   projects: Project[];
   blogs: Blog[];
+  housePlans?: HousePlan[];
   testimonials: Testimonial[];
   stats: Stats;
   enquiries: Enquiry[];
