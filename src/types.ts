@@ -137,6 +137,7 @@ export interface HousePlan {
   cadPackageSize?: string;
   cadPackagePrice?: number;
   cadPackageIncludes?: string[];
+  cadPackageBase64?: string;
   seoMeta?: {
     title: string;
     description: string;

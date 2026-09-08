@@ -34,7 +34,8 @@ import {
   CreditCard,
   Lock,
   FileCode,
-  Loader2
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Breadcrumbs } from './Breadcrumbs';
@@ -219,18 +220,45 @@ export const HousePlans: React.FC<HousePlansProps> = ({
   const triggerDownloadCadZip = (plan: HousePlan) => {
     setDownloadingCadFile(true);
     try {
-      const downloadUrl = plan.cadPackageZipUrl && plan.cadPackageZipUrl.startsWith('http')
-        ? plan.cadPackageZipUrl
-        : `/api/house-plans/${plan.id}/download-cad`;
-      
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.setAttribute('download', plan.cadPackageFileName || `${plan.planCode}-CAD-Package.zip`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // Strictly download ONLY the attached zip folder. No random packages are generated.
+      const attachedUrl = plan.cadPackageZipUrl;
+      const fileName = plan.cadPackageFileName || `${plan.planCode}-Drawings.zip`;
+
+      if (!attachedUrl) {
+        setPaymentError('No drawing ZIP folder has been attached to this plan yet. Please contact support with your Payment ID to receive the files.');
+        return;
+      }
+
+      if (attachedUrl.startsWith('data:')) {
+        // Base64 Data URL attached directly
+        const link = document.createElement('a');
+        link.href = attachedUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else if (attachedUrl.startsWith('http://') || attachedUrl.startsWith('https://')) {
+        // Direct attached Cloud/CDN link (Supabase, S3, Cloudflare, Drive, Dropbox)
+        const link = document.createElement('a');
+        link.href = attachedUrl;
+        link.download = fileName;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        // Local uploaded zip path (e.g. /uploads/cad-packages/... or /api/house-plans/:id/download-cad)
+        const downloadUrl = `/api/house-plans/${plan.id}/download-cad`;
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
     } catch (err) {
-      console.error('Download error:', err);
+      console.error('Attached ZIP download error:', err);
     } finally {
       setTimeout(() => setDownloadingCadFile(false), 2000);
     }
@@ -296,9 +324,21 @@ export const HousePlans: React.FC<HousePlansProps> = ({
                 })
               });
               const verifyData = await verifyRes.json();
-              if (verifyData.verified) {
+              if (verifyData.verified || verifyData.success) {
                 setPaymentTxnId(response.razorpay_payment_id || `PAY_${Date.now()}`);
                 setPaymentSuccess(true);
+                // Also log lead to enquiries API
+                fetch('/api/enquiries', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    name: clientName,
+                    phone: clientPhone,
+                    email: clientEmail,
+                    service: `CAD & PDF Download: ${currentCadPlan.planCode}`,
+                    requirement: `Purchased full architectural drawings package for ${currentCadPlan.title} (₹${currentCadPlan.cadPackagePrice || 999}). Razorpay Payment ID: ${response.razorpay_payment_id || 'Direct'}`
+                  })
+                }).catch(() => {});
                 triggerDownloadCadZip(currentCadPlan);
               } else {
                 setPaymentError('Payment verification signature check failed.');
@@ -344,9 +384,20 @@ export const HousePlans: React.FC<HousePlansProps> = ({
         });
 
         const verifyData = await verifyRes.json();
-        if (verifyData.verified) {
+        if (verifyData.verified || verifyData.success) {
           setPaymentTxnId(demoPaymentId);
           setPaymentSuccess(true);
+          fetch('/api/enquiries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: clientName,
+              phone: clientPhone,
+              email: clientEmail,
+              service: `CAD & PDF Download: ${currentCadPlan.planCode}`,
+              requirement: `Downloaded drawings package for ${currentCadPlan.title}. Reference: ${demoPaymentId}`
+            })
+          }).catch(() => {});
           triggerDownloadCadZip(currentCadPlan);
         } else {
           setPaymentError('Payment failed to confirm with payment server.');
@@ -1995,29 +2046,47 @@ export const HousePlans: React.FC<HousePlansProps> = ({
                       <span className="font-bold text-[#1A6DB5]">{currentCadPlan.planCode}</span>
                     </div>
                     <div className="flex justify-between">
+                      <span className="text-slate-400">Attached File:</span>
+                      <span className="font-bold text-slate-800 truncate max-w-[200px]" title={currentCadPlan.cadPackageFileName || 'Attached ZIP'}>
+                        {currentCadPlan.cadPackageFileName || (currentCadPlan.cadPackageZipUrl ? 'Attached ZIP Folder' : 'Pending Attachment')}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
                       <span className="text-slate-400">Amount Paid:</span>
                       <span className="font-bold text-emerald-700">₹{currentCadPlan.cadPackagePrice || 999}</span>
                     </div>
                   </div>
 
                   <div className="pt-2 space-y-2.5 max-w-sm mx-auto">
-                    <button
-                      onClick={() => triggerDownloadCadZip(currentCadPlan)}
-                      disabled={downloadingCadFile}
-                      className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-soft transition-all cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      {downloadingCadFile ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Downloading ZIP Archive...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-4 h-4" />
-                          <span>Download CAD &amp; PDF Drawings (.ZIP)</span>
-                        </>
-                      )}
-                    </button>
+                    {currentCadPlan.cadPackageZipUrl ? (
+                      <button
+                        onClick={() => triggerDownloadCadZip(currentCadPlan)}
+                        disabled={downloadingCadFile}
+                        className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-soft transition-all cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        {downloadingCadFile ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Downloading Attached File...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4" />
+                            <span>Download Attached ZIP ({currentCadPlan.cadPackageFileName || 'Drawings.zip'})</span>
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs text-left">
+                        <div className="flex items-center gap-2 font-bold mb-1">
+                          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                          <span>Drawing ZIP Attachment Pending</span>
+                        </div>
+                        <p className="text-[11px] text-amber-700">
+                          The drawing package has not been attached to this plan yet. Please contact our Chief Structural Engineer on WhatsApp with your Payment ID (<strong>{paymentTxnId}</strong>) to receive your files directly.
+                        </p>
+                      </div>
+                    )}
 
                     <a
                       href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Hello Lifehut Engineering Team, I just paid for CAD drawings package for house plan ${currentCadPlan.planCode} (Payment ID: ${paymentTxnId}). I would like to schedule a structural engineering consultation.`)}`}
