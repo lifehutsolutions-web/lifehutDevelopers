@@ -290,7 +290,8 @@ export const HousePlans: React.FC<HousePlansProps> = ({
       });
 
       if (!orderRes.ok) {
-        throw new Error('Could not initiate Razorpay checkout order.');
+        const errorJson = await orderRes.json().catch(() => null);
+        throw new Error(errorJson?.message || 'Could not initiate Razorpay checkout order. Please ensure Razorpay keys are configured in Admin Settings.');
       }
 
       const orderData = await orderRes.json();
@@ -298,7 +299,7 @@ export const HousePlans: React.FC<HousePlansProps> = ({
       // Check if official Razorpay checkout script is available on window
       const RazorpayConstructor = (window as any).Razorpay;
 
-      if (RazorpayConstructor && orderData.keyId && !orderData.isDemo) {
+      if (RazorpayConstructor && orderData.keyId) {
         // Open live/sandbox Razorpay pop-up
         const rzpOptions = {
           key: orderData.keyId,
@@ -366,42 +367,10 @@ export const HousePlans: React.FC<HousePlansProps> = ({
           setPaymentError(response.error.description || 'Payment was cancelled or declined.');
         });
         rzp.open();
+      } else if (!RazorpayConstructor) {
+        setPaymentError('Razorpay checkout module failed to load. Please refresh and check your internet connection.');
       } else {
-        // Sandbox / Test / Demo fallback: verify directly with server
-        const demoPaymentId = `rzp_demo_${Date.now()}`;
-        const verifyRes = await fetch('/api/razorpay/verify-payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            razorpay_order_id: orderData.orderId || `order_${Date.now()}`,
-            razorpay_payment_id: demoPaymentId,
-            razorpay_signature: 'demo_authorized_signature',
-            planId: currentCadPlan.id,
-            clientName,
-            clientPhone,
-            clientEmail
-          })
-        });
-
-        const verifyData = await verifyRes.json();
-        if (verifyData.verified || verifyData.success) {
-          setPaymentTxnId(demoPaymentId);
-          setPaymentSuccess(true);
-          fetch('/api/enquiries', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: clientName,
-              phone: clientPhone,
-              email: clientEmail,
-              service: `CAD & PDF Download: ${currentCadPlan.planCode}`,
-              requirement: `Downloaded drawings package for ${currentCadPlan.title}. Reference: ${demoPaymentId}`
-            })
-          }).catch(() => {});
-          triggerDownloadCadZip(currentCadPlan);
-        } else {
-          setPaymentError('Payment failed to confirm with payment server.');
-        }
+        setPaymentError('Payment gateway credentials are not configured yet. Please configure your Razorpay Key ID and Secret in Admin Panel settings.');
       }
     } catch (err: any) {
       console.error('Razorpay process failed:', err);

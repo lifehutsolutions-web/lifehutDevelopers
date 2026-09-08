@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
-import JSZip from 'jszip';
 import { createServer as createViteServer } from 'vite';
 import { CMSData, Service, Project, Blog, Testimonial, Enquiry, QuoteRequest, SiteSettings, Stats, HousePlan } from './src/types';
 import { defaultHousePlans } from './src/data/defaultHousePlans';
@@ -855,6 +854,7 @@ async function startServer() {
           db.housePlans[planIdx].cadPackageZipUrl = publicUrl;
           db.housePlans[planIdx].cadPackageFileName = fileName;
           db.housePlans[planIdx].cadPackageSize = sizeMb;
+          db.housePlans[planIdx].cadPackageBase64 = fileBase64;
           writeDB(db);
         }
       }
@@ -940,28 +940,24 @@ async function startServer() {
             });
           } else {
             const errText = await rzpResponse.text();
-            console.warn('Razorpay API response not OK, using sandbox fallback:', errText);
+            console.error('Razorpay API error response:', errText);
+            return res.status(400).json({
+              success: false,
+              message: 'Failed to create order on Razorpay. Please verify your Razorpay Key ID and Secret in Admin Settings.'
+            });
           }
-        } catch (apiErr) {
-          console.warn('Direct Razorpay API call failed, using sandbox fallback:', apiErr);
+        } catch (apiErr: any) {
+          console.error('Direct Razorpay API call failed:', apiErr);
+          return res.status(502).json({
+            success: false,
+            message: 'Unable to reach Razorpay servers. Please try again later.'
+          });
         }
       }
 
-      // Test Mode simulated order fallback (guarantees preview works seamlessly)
-      const mockOrderId = `order_test_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      return res.json({
-        success: true,
-        orderId: mockOrderId,
-        amount: amountInPaise,
-        currency: 'INR',
-        keyId: keyId || 'rzp_test_demo_lifehut',
-        testMode: true,
-        plan: {
-          id: plan?.id,
-          planCode: plan?.planCode,
-          title: plan?.title,
-          cadPackageFileName: plan?.cadPackageFileName
-        }
+      return res.status(400).json({
+        success: false,
+        message: 'Razorpay keys are not configured. Please enter your Razorpay Key ID and Secret in the Admin Panel settings.'
       });
     } catch (err: any) {
       console.error('Error creating Razorpay order:', err);
@@ -987,7 +983,7 @@ async function startServer() {
 
       let isValid = false;
 
-      if (razorpay_signature && keySecret && !razorpay_order_id.startsWith('order_test_')) {
+      if (razorpay_signature && keySecret && razorpay_order_id && razorpay_payment_id) {
         const body = razorpay_order_id + '|' + razorpay_payment_id;
         const expectedSignature = crypto
           .createHmac('sha256', keySecret)
@@ -996,8 +992,7 @@ async function startServer() {
 
         isValid = expectedSignature === razorpay_signature;
       } else {
-        // Test / demo mode order verification
-        isValid = Boolean(razorpay_payment_id || razorpay_order_id);
+        isValid = false;
       }
 
       if (!isValid) {
@@ -1027,6 +1022,7 @@ async function startServer() {
 
       return res.json({
         success: true,
+        verified: true,
         message: 'Payment verified successfully! Your CAD & PDF package is ready for download.',
         downloadUrl,
         paymentId: razorpay_payment_id || `PAY_${Date.now()}`,
@@ -1047,125 +1043,79 @@ async function startServer() {
       const { id } = req.params;
       const db = readDB();
       const plans = db.housePlans || defaultHousePlans;
-      const plan = plans.find(p => p.id === id || p.slug === id || p.planCode === id);
+      const idLower = (id || '').toLowerCase();
+      const plan = plans.find(p => 
+        p.id === id || 
+        p.slug === id || 
+        p.planCode === id ||
+        (p.id && p.id.toLowerCase() === idLower) ||
+        (p.slug && p.slug.toLowerCase() === idLower) ||
+        (p.planCode && p.planCode.toLowerCase() === idLower)
+      );
 
       if (!plan) {
-        return res.status(404).send('House plan not found.');
+        return res.status(404).json({ success: false, message: 'House plan not found.' });
       }
 
-      const targetFileName = plan.cadPackageFileName || `${plan.planCode}-Architectural-CAD-Package.zip`;
+      if (!plan.cadPackageZipUrl) {
+        return res.status(404).json({ success: false, message: 'No attached drawing ZIP folder found for this plan.' });
+      }
 
-      // 1. If an uploaded ZIP file exists locally on disk in uploads/cad-packages/
-      if (plan.cadPackageZipUrl && plan.cadPackageZipUrl.startsWith('/uploads/cad-packages/')) {
+      const targetFileName = plan.cadPackageFileName || `${plan.planCode}-Drawings.zip`;
+
+      // 1. If stored as Base64 Data URI
+      if (plan.cadPackageZipUrl.startsWith('data:')) {
+        const base64Data = plan.cadPackageZipUrl.replace(/^data:[^;]+;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
+        res.setHeader('Content-Length', buffer.length.toString());
+        return res.send(buffer);
+      }
+
+      // 2. If an uploaded ZIP file exists locally on disk in uploads/cad-packages/
+      if (plan.cadPackageZipUrl.startsWith('/uploads/cad-packages/')) {
         const localDiskPath = path.join(process.cwd(), plan.cadPackageZipUrl);
         if (fs.existsSync(localDiskPath)) {
           res.setHeader('Content-Type', 'application/zip');
           res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
           return fs.createReadStream(localDiskPath).pipe(res);
         }
+
+        // If file is not yet on disk but was persisted as base64 in database
+        if (plan.cadPackageBase64) {
+          const base64Data = plan.cadPackageBase64.replace(/^data:[^;]+;base64,/, '');
+          const buffer = Buffer.from(base64Data, 'base64');
+          fs.writeFileSync(localDiskPath, buffer);
+          res.setHeader('Content-Type', 'application/zip');
+          res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
+          res.setHeader('Content-Length', buffer.length.toString());
+          return res.send(buffer);
+        }
       }
 
-      // 2. If an uploaded ZIP exists on an external URL or Supabase storage
-      if (plan.cadPackageZipUrl && plan.cadPackageZipUrl.startsWith('http')) {
+      // 3. If an uploaded ZIP exists on an external URL or Supabase storage
+      if (plan.cadPackageZipUrl.startsWith('http://') || plan.cadPackageZipUrl.startsWith('https://')) {
         return res.redirect(plan.cadPackageZipUrl);
       }
 
-      // 3. Dynamic Architectural ZIP generation using JSZip
-      const zip = new JSZip();
+      // 4. Any other relative path on disk
+      if (plan.cadPackageZipUrl.startsWith('/')) {
+        const localPath = path.join(process.cwd(), plan.cadPackageZipUrl);
+        if (fs.existsSync(localPath)) {
+          res.setHeader('Content-Type', 'application/zip');
+          res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
+          return fs.createReadStream(localPath).pipe(res);
+        }
+      }
 
-      const readmeContent = `========================================================================
-LIFEHUT DEVELOPERS CHENNAI — OFFICIAL ARCHITECTURAL CAD & DRAWING PACKAGE
-========================================================================
-Project Reference : ${plan.title}
-Plan Code         : ${plan.planCode}
-Configuration     : ${plan.bedrooms} BHK | ${plan.floorsLabel} (${plan.floors} Storey)
-Total Built-up Area: ${plan.builtUpArea} Sq.Ft
-Target Plot Size  : ${plan.plotDimensions}
-Orientation       : ${plan.facing} Facing (100% Vastu Shastra Compliant)
-Estimated Turnkey : ${plan.estimatedCostRange} (${plan.costPerSqft || 'Turnkey in Chennai'})
-Issue Date        : ${new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}
-Lead Engineer     : Senior Structural Consultant, M.E.
-Consultancy Office: No.16, 1st Street, Nehru Nagar, Ambattur, Chennai – 600053
-Direct WhatsApp   : +91 80721 63330 | lifehutdevelopers@gmail.com
-========================================================================
-
-PACKAGE BLUEPRINT ASSETS:
-1. ${plan.planCode}-Architectural-Floor-Plan.dwg (AutoCAD 2018+ compatible format)
-2. ${plan.planCode}-Structural-Reinforcement-Schedule.txt (RCC Column & Beam Schedule)
-3. ${plan.planCode}-Room-Dimensions-Vastu-Schedule.txt
-4. ${plan.planCode}-Chennai-Sanction-Approval-Guide.txt
-5. Lifehut-Turnkey-Execution-Warranty-Charter.txt
-
-------------------------------------------------------------------------
-ROOM DIMENSIONS & VASTU ALIGNMENT:
-------------------------------------------------------------------------
-${plan.roomDimensions?.map((r, i) => `${i + 1}. [${r.floor}] ${r.roomName.padEnd(28)} : ${r.dimension.padEnd(16)} | Vastu: ${r.vastuZone || 'Aligned'}`).join('\n') || 'Refer to architectural drawings'}
-
-------------------------------------------------------------------------
-ARCHITECTURAL & VASTU DESIGN NOTES:
-------------------------------------------------------------------------
-${plan.vastuNotes?.map((v) => `* ${v}`).join('\n') || '* 100% Vastu approved layout'}
-
-------------------------------------------------------------------------
-STRUCTURAL CIVIL SPECIFICATIONS (IS CODE COMPLIANT):
-------------------------------------------------------------------------
-- Foundation: Isolated RCC Trapezoidal Column Footings designed for SBC >= 150 kN/m2.
-- Concrete Grade: M25 (1:1:2) machine-mixed with potable water ratio <= 0.45.
-- Reinforcement: Fe 550D TMT High-Ductility Steel bars (Tata Tiscon / JSW / SAIL).
-- Masonry: First-class red wirecut clay bricks or AAC thermal blockwork in CM 1:6.
-- Anti-Termite: Pre-construction soil chemical barrier treatment (Bifenthrin 2.5% EC).
-- Waterproofing: Two-coat elastomeric crystalline waterproofing on all sun-sunk slabs.
-
-For site soil testing, custom site adjustments, or Chennai Corporation plan sanctions,
-contact Lifehut Developers directly at +91 80721 63330.
-`;
-
-      const dwgMockContent = `AutoCAD 2018 Drawing Binary Exchange Header - Lifehut Developers\n` +
-        `Plan: ${plan.title} [${plan.planCode}]\n` +
-        `Units: Imperial Architectural (Feet & Inches)\n` +
-        `Plot: ${plan.plotDimensions}, Built-up: ${plan.builtUpArea} sq.ft\n` +
-        `Designed by Lifehut Developers Chennai.\n`;
-
-      const rccSchedule = `========================================================================
-LIFEHUT DEVELOPERS — STRUCTURAL RCC COLUMN & BEAM BAR BENDING SCHEDULE
-========================================================================
-Plan Code: ${plan.planCode} (${plan.builtUpArea} Sq.Ft - ${plan.floorsLabel})
-Code Compliance: IS 456:2000 (Plain & Reinforced Concrete), IS 13920 (Ductile Detailing)
-
-COLUMN SPECIFICATIONS:
-- C1 (Corner Columns) : 9" x 12" | 4 Nos 16mm Dia Fe 550D + 2 Nos 12mm Dia | 8mm rings @ 6" c/c
-- C2 (Internal Columns): 9" x 15" | 6 Nos 16mm Dia Fe 550D | 8mm rings @ 4" c/c near joints, 6" mid-span
-- Footing Depth       : Minimum 5'0" below Natural Ground Level into hard gravel/strata
-
-PLINTH & ROOF BEAM SPECIFICATIONS:
-- Plinth Beam (PB1)   : 9" x 12" | Top: 2-12mm, Bottom: 3-16mm | Stirrups: 8mm @ 6" c/c
-- Floor Beam (FB1)    : 9" x 15" | Top: 3-16mm, Bottom: 3-16mm + 1-12mm curtail | 8mm @ 5" c/c
-- Roof Slab Thickness : 5 Inches (125mm) M25 Grade with 8mm/10mm Fe 550D mesh @ 6" c/c
-
-CONCEALED MEP CONDUIT RUNS:
-- Electrical Conduits: Heavy-duty 20mm/25mm FRLS PVC pipes embedded in floor slabs.
-- Plumbing: Astral/Finolex CPVC schedule-40 for hot/cold water, SWR 110mm for drainage.
-`;
-
-      zip.file("README-Architectural-Plan-Specs.txt", readmeContent);
-      zip.file(`${plan.planCode}-Floor-Plan.dwg`, dwgMockContent);
-      zip.file(`${plan.planCode}-Structural-Reinforcement-Schedule.txt`, rccSchedule);
-      zip.file("Lifehut-Turnkey-Warranty-Certificate.txt",
-`LIFEHUT DEVELOPERS (CHAIR OF EXCELLENCE)
-10-Year Structural Frame Warranty & 1-Year Free Maintenance Guarantee
-Authorized by Chief Structural Engineer.
-Contact: +91 80721 63330 | Ambattur, Chennai`
-      );
-
-      const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
-      res.setHeader('Content-Length', zipBuffer.length.toString());
-      return res.send(zipBuffer);
+      return res.status(404).json({
+        success: false,
+        message: 'The attached drawing ZIP file was not found on the server. Please attach or re-upload it in Admin Panel.'
+      });
     } catch (err: any) {
-      console.error('Error generating CAD zip download:', err);
-      res.status(500).send('Failed to generate CAD download package.');
+      console.error('Error downloading attached CAD zip:', err);
+      res.status(500).json({ success: false, message: 'Failed to download attached CAD package.' });
     }
   });
 
