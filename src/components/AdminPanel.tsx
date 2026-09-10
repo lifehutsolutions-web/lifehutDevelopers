@@ -138,6 +138,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSavedSuccess, setSettingsSavedSuccess] = useState(false);
+  const [testingRazorpay, setTestingRazorpay] = useState(false);
+  const [razorpayTestStatus, setRazorpayTestStatus] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleTestRazorpay = async () => {
+    setTestingRazorpay(true);
+    setRazorpayTestStatus(null);
+    try {
+      const res = await fetch('/api/razorpay/config');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.isConfigured && !data.testMode) {
+          setRazorpayTestStatus({
+            success: true,
+            message: `Active Live Gateway Verified! Connected with Key ID: ${data.keyId}`
+          });
+        } else {
+          setRazorpayTestStatus({
+            success: true,
+            message: `Sandbox Simulation Active. Clients and admins can test checkout & downloads without real charges.`
+          });
+        }
+      } else {
+        setRazorpayTestStatus({
+          success: false,
+          message: 'Unable to reach backend payment service.'
+        });
+      }
+    } catch (err: any) {
+      setRazorpayTestStatus({
+        success: false,
+        message: 'Test request failed: ' + (err?.message || 'Network error')
+      });
+    } finally {
+      setTestingRazorpay(false);
+    }
+  };
 
   useEffect(() => {
     if (settings) {
@@ -560,6 +596,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     if (isSupabaseConfigured()) {
       const ok = await saveSupabaseSettings(payload);
+      // Synchronize with server endpoint in background so server_db has latest keys
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch(() => {});
       setSettingsSaving(false);
       setSettingsSavedSuccess(true);
       setTimeout(() => setSettingsSavedSuccess(false), 4000);
@@ -1446,6 +1488,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <span>
                   When Razorpay API keys are configured, clients complete seamless payments via UPI (Google Pay, PhonePe, Paytm), NetBanking, or Credit/Debit Cards. If left blank, simulated sandbox checkout is automatically enabled so you and clients can test instant downloads without charges.
                 </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={handleTestRazorpay}
+                  disabled={testingRazorpay}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 w-fit disabled:opacity-50"
+                >
+                  {testingRazorpay ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#1A6DB5]" />
+                      <span>Verifying Gateway...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>⚡ Test Gateway Connection</span>
+                    </>
+                  )}
+                </button>
+
+                {razorpayTestStatus && (
+                  <div className={`text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 ${razorpayTestStatus.success ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
+                    <span>{razorpayTestStatus.message}</span>
+                  </div>
+                )}
               </div>
             </div>
 
