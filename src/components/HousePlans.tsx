@@ -399,7 +399,7 @@ Chennai, Tamil Nadu
       }
 
       if (!orderRes.ok || !orderData || !orderData.orderId || !orderData.keyId) {
-        const errorMsg = orderData?.message || 'Razorpay order creation failed. Please check your Razorpay credentials in Admin Settings.';
+        const errorMsg = orderData?.message || `Razorpay order creation failed (HTTP ${orderRes.status}). Please check credentials in Cloudflare environment variables or Admin Settings.`;
         throw new Error(errorMsg);
       }
 

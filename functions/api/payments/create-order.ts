@@ -1,5 +1,5 @@
-// Cloudflare Pages Function: POST /api/razorpay/create-order
-// Real Razorpay order creation only - No sandbox/test simulations
+// Cloudflare Pages Function: POST /api/payments/create-order
+// Creates a genuine Razorpay payment order for house plans CAD & PDF package
 
 interface Env {
   RAZORPAY_KEY_ID?: string;
@@ -19,9 +19,22 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     const body: any = await context.request.json().catch(() => ({}));
     const { planId, clientName, clientEmail, clientPhone, amount } = body;
 
-    const finalAmount = Number(amount) || 999;
-    const amountInPaise = Math.round(finalAmount * 100);
+    if (!planId) {
+      return new Response(
+        JSON.stringify({ success: false, message: 'Plan ID is required to initiate checkout.' }),
+        { status: 400, headers: corsHeaders }
+      );
+    }
 
+    const finalAmount = Number(amount) || 999;
+    if (finalAmount <= 0) {
+      return new Response(
+        JSON.stringify({ success: false, message: 'This plan is free. Please claim via free download route.' }),
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    const amountInPaise = Math.round(finalAmount * 100);
     let keyId = (context.env.RAZORPAY_KEY_ID || context.env.VITE_RAZORPAY_KEY_ID || body.keyId || '').trim();
     let keySecret = (context.env.RAZORPAY_KEY_SECRET || body.keySecret || '').trim();
 
@@ -44,8 +57,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
             if (!keySecret && stats.razorpayKeySecret) keySecret = String(stats.razorpayKeySecret).trim();
           }
         }
-      } catch {
-        // ignore fallback errors
+      } catch (err) {
+        // ignore supabase fallback errors
       }
     }
 
@@ -53,7 +66,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       return new Response(
         JSON.stringify({
           success: false,
-          message: 'Razorpay payment gateway credentials are not configured in Cloudflare environment variables or Admin Settings.'
+          message: 'Razorpay credentials (Key ID and Secret) are missing or not configured in Cloudflare Environment Variables or Admin Settings. Please visit /api/payments/debug-env to inspect environment.'
         }),
         { status: 400, headers: corsHeaders }
       );
@@ -71,16 +84,17 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
         currency: 'INR',
         receipt: `rcpt_lh_${Date.now().toString().slice(-8)}`,
         notes: {
-          planId: planId || '',
-          clientName: clientName || '',
-          clientPhone: clientPhone || ''
+          planId: String(planId),
+          clientName: String(clientName || ''),
+          clientPhone: String(clientPhone || ''),
+          clientEmail: String(clientEmail || '')
         }
       })
     });
 
     if (!rzpResponse.ok) {
       const errJson: any = await rzpResponse.json().catch(() => ({}));
-      const errDescription = errJson?.error?.description || errJson?.message || 'Failed to create order with Razorpay.';
+      const errDescription = errJson?.error?.description || errJson?.message || 'Razorpay order creation failed.';
       return new Response(
         JSON.stringify({
           success: false,
@@ -97,9 +111,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
         orderId: orderData.id,
         amount: orderData.amount,
         currency: orderData.currency || 'INR',
-        keyId: keyId,
-        testMode: false,
-        isDemo: false
+        keyId: keyId
       }),
       { status: 200, headers: corsHeaders }
     );

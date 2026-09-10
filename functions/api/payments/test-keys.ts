@@ -1,5 +1,5 @@
-// Cloudflare Pages Function: POST /api/razorpay/test-keys
-// Tests Razorpay API credentials on Cloudflare Edge
+// Cloudflare Pages Function: POST /api/payments/test-keys
+// Verifies live or test Razorpay credentials against Razorpay API
 
 interface Env {
   RAZORPAY_KEY_ID?: string;
@@ -17,15 +17,35 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
 
   try {
     const body: any = await context.request.json().catch(() => ({}));
-    const keyId = (body.keyId || context.env.RAZORPAY_KEY_ID || '').trim();
-    const keySecret = (body.keySecret || context.env.RAZORPAY_KEY_SECRET || '').trim();
+    let keyId = (body.keyId || context.env.RAZORPAY_KEY_ID || context.env.VITE_RAZORPAY_KEY_ID || '').trim();
+    let keySecret = (body.keySecret || context.env.RAZORPAY_KEY_SECRET || '').trim();
+
+    if (!keyId || !keySecret) {
+      try {
+        const sbUrl = context.env.VITE_SUPABASE_URL || context.env.SUPABASE_URL || 'https://vkthcqceywhdlmjsvsze.supabase.co';
+        const sbKey = context.env.VITE_SUPABASE_ANON_KEY || context.env.SUPABASE_ANON_KEY || 'sb_publishable__eUGKx9jON0kZ1dVrBRmLw_-huhN1d7';
+        const sbRes = await fetch(`${sbUrl}/rest/v1/settings?select=stats&limit=1`, {
+          headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` }
+        });
+        if (sbRes.ok) {
+          const rows: any = await sbRes.json().catch(() => []);
+          const stats = rows?.[0]?.stats;
+          if (stats) {
+            if (!keyId && stats.razorpayKeyId) keyId = String(stats.razorpayKeyId).trim();
+            if (!keySecret && stats.razorpayKeySecret) keySecret = String(stats.razorpayKeySecret).trim();
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     if (!keyId) {
       return new Response(
         JSON.stringify({
-          success: true,
-          status: 'sandbox',
-          message: 'No Key ID entered. Simulated sandbox mode is active for safe test orders.'
+          success: false,
+          status: 'missing_key',
+          message: 'Razorpay Key ID is required to accept actual payments. Please enter Key ID.'
         }),
         { status: 200, headers: corsHeaders }
       );
@@ -95,7 +115,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
         JSON.stringify({
           success: true,
           status: 'network_warning',
-          message: `Key format valid (${keyId.startsWith('rzp_live_') ? 'Live' : 'Test'}). Note: External Razorpay ping timed out, but keys are saved.`
+          message: `Key format valid (${keyId.startsWith('rzp_live_') ? 'Live' : 'Test'}). Credentials saved.`
         }),
         { status: 200, headers: corsHeaders }
       );

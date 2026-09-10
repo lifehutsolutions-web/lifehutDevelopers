@@ -48,14 +48,36 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       clientPhone
     } = body;
 
-    const keySecret = (context.env.RAZORPAY_KEY_SECRET || '').trim();
+    let keySecret = (context.env.RAZORPAY_KEY_SECRET || '').trim();
+
+    if (!keySecret) {
+      try {
+        const sbUrl = context.env.VITE_SUPABASE_URL || context.env.SUPABASE_URL || 'https://vkthcqceywhdlmjsvsze.supabase.co';
+        const sbKey = context.env.VITE_SUPABASE_ANON_KEY || context.env.SUPABASE_ANON_KEY || 'sb_publishable__eUGKx9jON0kZ1dVrBRmLw_-huhN1d7';
+        const sbRes = await fetch(`${sbUrl}/rest/v1/settings?select=stats&limit=1`, {
+          headers: {
+            apikey: sbKey,
+            Authorization: `Bearer ${sbKey}`
+          }
+        });
+        if (sbRes.ok) {
+          const rows: any = await sbRes.json().catch(() => []);
+          const stats = rows?.[0]?.stats;
+          if (stats?.razorpayKeySecret) {
+            keySecret = String(stats.razorpayKeySecret).trim();
+          }
+        }
+      } catch {
+        // ignore fallback errors
+      }
+    }
 
     if (!keySecret) {
       return new Response(
         JSON.stringify({
           success: false,
           verified: false,
-          message: 'Razorpay Secret Key is not configured on the server. Payment cannot be verified.'
+          message: 'Razorpay Secret Key is not configured in Cloudflare environment variables or Admin Settings.'
         }),
         { status: 500, headers: corsHeaders }
       );
