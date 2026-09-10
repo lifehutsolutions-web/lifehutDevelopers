@@ -945,6 +945,77 @@ async function startServer() {
     }
   });
 
+  app.post('/api/razorpay/test-keys', async (req, res) => {
+    try {
+      const config = await getActiveRazorpayConfig();
+      const keyId = (req.body?.keyId !== undefined ? req.body.keyId : config.keyId || '').trim();
+      const keySecret = (req.body?.keySecret !== undefined ? req.body.keySecret : config.keySecret || '').trim();
+
+      if (!keyId || keyId.includes('demo') || keyId.includes('placeholder')) {
+        return res.json({
+          success: true,
+          status: 'sandbox',
+          message: 'Sandbox Simulation Active: Safe test checkout mode without charges.'
+        });
+      }
+
+      if (!keyId.startsWith('rzp_live_') && !keyId.startsWith('rzp_test_')) {
+        return res.json({
+          success: false,
+          status: 'invalid_format',
+          message: `Key ID format should start with 'rzp_live_' or 'rzp_test_'. Provided: ${keyId.slice(0, 10)}...`
+        });
+      }
+
+      if (!keySecret) {
+        return res.json({
+          success: false,
+          status: 'missing_secret',
+          message: 'Razorpay Key Secret is required alongside Key ID.'
+        });
+      }
+
+      // Test credentials against Razorpay Orders API
+      try {
+        const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+        const testRes = await fetch('https://api.razorpay.com/v1/orders?count=1', {
+          method: 'GET',
+          headers: { 'Authorization': authHeader }
+        });
+
+        if (testRes.ok) {
+          const isLive = keyId.startsWith('rzp_live_');
+          return res.json({
+            success: true,
+            status: isLive ? 'live_verified' : 'test_verified',
+            isLive,
+            keyId,
+            message: isLive
+              ? 'Live Gateway Verified! Active Razorpay Production API keys confirmed.'
+              : 'Test Gateway Verified! Active Razorpay Test API keys confirmed.'
+          });
+        } else {
+          const errData: any = await testRes.json().catch(() => ({}));
+          const desc = errData?.error?.description || `Authentication failed (HTTP ${testRes.status})`;
+          return res.json({
+            success: false,
+            status: 'auth_failed',
+            message: `Razorpay rejected credentials: ${desc}`
+          });
+        }
+      } catch (fetchErr: any) {
+        return res.json({
+          success: true,
+          status: 'network_warning',
+          message: `Key format valid (${keyId.startsWith('rzp_live_') ? 'Live' : 'Test'}). Note: External ping timed out, but keys are configured.`
+        });
+      }
+    } catch (err: any) {
+      console.error('Error in test-keys:', err);
+      res.status(500).json({ success: false, message: 'Internal error testing keys.' });
+    }
+  });
+
   app.post('/api/razorpay/create-order', async (req, res) => {
     try {
       const { planId, clientName, clientEmail, clientPhone, amount } = req.body;

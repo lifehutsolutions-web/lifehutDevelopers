@@ -44,9 +44,14 @@ CREATE TABLE IF NOT EXISTS public.projects (
     client_name TEXT,
     client_avatar TEXT,
     status TEXT DEFAULT 'Completed',
+    tags JSONB DEFAULT '[]'::jsonb,
     is_recent BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure optional columns exist on existing tables
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS is_recent BOOLEAN DEFAULT false;
 
 -- 3. Enquiries Table
 CREATE TABLE IF NOT EXISTS public.enquiries (
@@ -92,6 +97,7 @@ CREATE TABLE IF NOT EXISTS public.settings (
     facebook_url TEXT,
     instagram_url TEXT,
     pinterest_url TEXT,
+    youtube_url TEXT,
     linkedin_url TEXT,
     seo_title TEXT,
     seo_description TEXT,
