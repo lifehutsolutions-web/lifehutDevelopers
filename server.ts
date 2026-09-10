@@ -945,22 +945,26 @@ async function startServer() {
     }
   });
 
-  app.post('/api/razorpay/test-keys', async (req, res) => {
+  app.get('/api/health', (_req, res) => {
+    res.json({ status: 'ok', service: 'Lifehut Developers API', time: new Date().toISOString() });
+  });
+
+  const handleTestKeysEndpoint = async (req: express.Request, res: express.Response) => {
     try {
       const config = await getActiveRazorpayConfig();
       const keyId = (req.body?.keyId !== undefined ? req.body.keyId : config.keyId || '').trim();
       const keySecret = (req.body?.keySecret !== undefined ? req.body.keySecret : config.keySecret || '').trim();
 
-      if (!keyId || keyId.includes('demo') || keyId.includes('placeholder')) {
-        return res.json({
-          success: true,
-          status: 'sandbox',
-          message: 'Sandbox Simulation Active: Safe test checkout mode without charges.'
+      if (!keyId) {
+        return res.status(400).json({
+          success: false,
+          status: 'missing_key',
+          message: 'Razorpay Key ID is required to process actual payments.'
         });
       }
 
       if (!keyId.startsWith('rzp_live_') && !keyId.startsWith('rzp_test_')) {
-        return res.json({
+        return res.status(400).json({
           success: false,
           status: 'invalid_format',
           message: `Key ID format should start with 'rzp_live_' or 'rzp_test_'. Provided: ${keyId.slice(0, 10)}...`
@@ -968,7 +972,7 @@ async function startServer() {
       }
 
       if (!keySecret) {
-        return res.json({
+        return res.status(400).json({
           success: false,
           status: 'missing_secret',
           message: 'Razorpay Key Secret is required alongside Key ID.'
@@ -997,7 +1001,7 @@ async function startServer() {
         } else {
           const errData: any = await testRes.json().catch(() => ({}));
           const desc = errData?.error?.description || `Authentication failed (HTTP ${testRes.status})`;
-          return res.json({
+          return res.status(400).json({
             success: false,
             status: 'auth_failed',
             message: `Razorpay rejected credentials: ${desc}`
@@ -1007,16 +1011,42 @@ async function startServer() {
         return res.json({
           success: true,
           status: 'network_warning',
-          message: `Key format valid (${keyId.startsWith('rzp_live_') ? 'Live' : 'Test'}). Note: External ping timed out, but keys are configured.`
+          message: `Key format valid (${keyId.startsWith('rzp_live_') ? 'Live' : 'Test'}). Note: External ping timed out, but keys are saved.`
         });
       }
     } catch (err: any) {
       console.error('Error in test-keys:', err);
       res.status(500).json({ success: false, message: 'Internal error testing keys.' });
     }
-  });
+  };
 
-  app.post('/api/razorpay/create-order', async (req, res) => {
+  app.post('/api/razorpay/test-keys', handleTestKeysEndpoint);
+  app.post('/api/payments/test-keys', handleTestKeysEndpoint);
+
+  // --- PAYMENT & SECURE DOWNLOAD UTILITIES ---
+  const DOWNLOAD_SECRET = process.env.DOWNLOAD_SECRET || 'lifehut_secure_cad_token_key';
+
+  function generateDownloadToken(planId: string, paymentId: string, secret: string = DOWNLOAD_SECRET): string {
+    const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+    const tokenPayload = `${planId}:${paymentId}:${expiresAt}`;
+    const tokenSignature = crypto.createHmac('sha256', secret).update(tokenPayload).digest('hex');
+    return `${expiresAt}.${tokenSignature}`;
+  }
+
+  function verifyDownloadToken(planId: string, paymentId: string, token: string, secret: string = DOWNLOAD_SECRET): boolean {
+    if (!token || !planId || !paymentId) return false;
+    const parts = token.split('.');
+    if (parts.length !== 2) return false;
+    const [expiresAtStr, providedSignature] = parts;
+    const expiresAt = Number(expiresAtStr);
+    if (isNaN(expiresAt) || Date.now() > expiresAt) return false;
+    const tokenPayload = `${planId}:${paymentId}:${expiresAt}`;
+    const expectedSignature = crypto.createHmac('sha256', secret).update(tokenPayload).digest('hex');
+    return expectedSignature.toLowerCase() === providedSignature.toLowerCase();
+  }
+
+  // Common Order Creation Handler (Real Razorpay Checkout Only - No Sandbox / Test Simulation)
+  const handleCreateOrder = async (req: express.Request, res: express.Response) => {
     try {
       const { planId, clientName, clientEmail, clientPhone, amount } = req.body;
       const db = readDB();
@@ -1024,8 +1054,14 @@ async function startServer() {
       const plan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId);
 
       const finalAmount = Number(amount) || plan?.cadPackagePrice || 999;
-      const amountInPaise = Math.round(finalAmount * 100);
+      if (finalAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'This plan is free. Please claim via the free download route.'
+        });
+      }
 
+      const amountInPaise = Math.round(finalAmount * 100);
       const config = await getActiveRazorpayConfig();
 
       if (!config.enabled) {
@@ -1035,104 +1071,52 @@ async function startServer() {
         });
       }
 
-      // If real live or valid test Razorpay keys are configured, call the Razorpay Orders API
-      if (config.isRealRazorpay && config.keySecret) {
-        try {
-          const authHeader = 'Basic ' + Buffer.from(`${config.keyId}:${config.keySecret}`).toString('base64');
-          const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
-            method: 'POST',
-            headers: {
-              'Authorization': authHeader,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              amount: amountInPaise,
-              currency: 'INR',
-              receipt: `rcpt_lh_${Date.now().toString().slice(-8)}`,
-              notes: {
-                planId: plan?.id || planId,
-                planCode: plan?.planCode || '',
-                title: plan?.title || 'House Plan Blueprints',
-                clientName: clientName || '',
-                clientPhone: clientPhone || ''
-              }
-            })
-          });
-
-          if (rzpResponse.ok) {
-            const orderData = (await rzpResponse.json()) as any;
-            return res.json({
-              success: true,
-              orderId: orderData.id,
-              amount: orderData.amount,
-              currency: orderData.currency,
-              keyId: config.keyId,
-              testMode: false,
-              isDemo: false,
-              plan: {
-                id: plan?.id,
-                planCode: plan?.planCode,
-                title: plan?.title,
-                cadPackageFileName: plan?.cadPackageFileName
-              }
-            });
-          } else {
-            const errText = await rzpResponse.text();
-            console.warn('Razorpay API rejected order creation:', errText);
-            // If live credentials rejected (e.g. invalid key secret), fall back to graceful sandbox demo mode
-            const mockOrderId = `order_test_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-            return res.json({
-              success: true,
-              orderId: mockOrderId,
-              amount: amountInPaise,
-              currency: 'INR',
-              keyId: config.keyId || 'rzp_test_demo_lifehut',
-              testMode: true,
-              isDemo: true,
-              warning: 'Live Razorpay API authentication failed. Switched to sandbox test mode.',
-              plan: {
-                id: plan?.id || planId,
-                planCode: plan?.planCode,
-                title: plan?.title,
-                cadPackageFileName: plan?.cadPackageFileName
-              }
-            });
-          }
-        } catch (apiErr: any) {
-          console.error('Direct Razorpay API call failed:', apiErr);
-          // Fall back to sandbox test mode
-          const mockOrderId = `order_test_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-          return res.json({
-            success: true,
-            orderId: mockOrderId,
-            amount: amountInPaise,
-            currency: 'INR',
-            keyId: config.keyId || 'rzp_test_demo_lifehut',
-            testMode: true,
-            isDemo: true,
-            plan: {
-              id: plan?.id || planId,
-              planCode: plan?.planCode,
-              title: plan?.title,
-              cadPackageFileName: plan?.cadPackageFileName
-            }
-          });
-        }
+      if (!config.keyId || !config.keySecret) {
+        return res.status(400).json({
+          success: false,
+          message: 'Razorpay payment gateway credentials (Key ID and Secret) are not configured on the server. Please enter your Razorpay keys in Admin Settings.'
+        });
       }
 
-      // Graceful Sandbox simulation mode (when keys are not configured or placeholder)
-      // As promised in Admin Settings: "If left blank, simulated sandbox checkout is automatically enabled"
-      const mockOrderId = `order_test_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const authHeader = 'Basic ' + Buffer.from(`${config.keyId}:${config.keySecret}`).toString('base64');
+      const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          amount: amountInPaise,
+          currency: 'INR',
+          receipt: `rcpt_lh_${Date.now().toString().slice(-8)}`,
+          notes: {
+            planId: plan?.id || planId,
+            planCode: plan?.planCode || '',
+            title: plan?.title || 'House Plan Blueprints',
+            clientName: clientName || '',
+            clientPhone: clientPhone || ''
+          }
+        })
+      });
+
+      if (!rzpResponse.ok) {
+        const errJson = (await rzpResponse.json().catch(() => ({}))) as any;
+        const errDesc = errJson?.error?.description || errJson?.message || 'Razorpay order creation failed.';
+        return res.status(rzpResponse.status).json({
+          success: false,
+          message: `Razorpay Error: ${errDesc}`
+        });
+      }
+
+      const orderData = (await rzpResponse.json()) as any;
       return res.json({
         success: true,
-        orderId: mockOrderId,
-        amount: amountInPaise,
-        currency: 'INR',
-        keyId: config.keyId || 'rzp_test_demo_lifehut',
-        testMode: true,
-        isDemo: true,
+        orderId: orderData.id,
+        amount: orderData.amount,
+        currency: orderData.currency || 'INR',
+        keyId: config.keyId,
         plan: {
-          id: plan?.id || planId,
+          id: plan?.id,
           planCode: plan?.planCode,
           title: plan?.title,
           cadPackageFileName: plan?.cadPackageFileName
@@ -1142,9 +1126,13 @@ async function startServer() {
       console.error('Error creating Razorpay order:', err);
       res.status(500).json({ success: false, message: err.message || 'Failed to create payment order' });
     }
-  });
+  };
 
-  app.post('/api/razorpay/verify-payment', async (req, res) => {
+  app.post('/api/payments/create-order', handleCreateOrder);
+  app.post('/api/razorpay/create-order', handleCreateOrder);
+
+  // Common Payment Verification Handler (Cryptographic HMAC-SHA256 signature verification only)
+  const handleVerifyPayment = async (req: express.Request, res: express.Response) => {
     try {
       const {
         razorpay_order_id,
@@ -1157,40 +1145,44 @@ async function startServer() {
         notes
       } = req.body;
 
+      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          message: 'Missing required payment verification credentials.'
+        });
+      }
+
       const db = readDB();
       const config = await getActiveRazorpayConfig();
 
-      let isValid = false;
-
-      // Real signature check if not a sandbox test order
-      if (
-        razorpay_order_id &&
-        !razorpay_order_id.startsWith('order_test_') &&
-        razorpay_signature &&
-        config.isRealRazorpay &&
-        config.keySecret
-      ) {
-        const body = razorpay_order_id + '|' + razorpay_payment_id;
-        const expectedSignature = crypto
-          .createHmac('sha256', config.keySecret)
-          .update(body.toString())
-          .digest('hex');
-
-        isValid = expectedSignature.toLowerCase() === razorpay_signature.toLowerCase();
-      } else {
-        // Sandbox test mode verification succeeds automatically
-        isValid = Boolean(razorpay_order_id || razorpay_payment_id);
+      if (!config.keySecret) {
+        return res.status(500).json({
+          success: false,
+          verified: false,
+          message: 'Razorpay Secret Key is not configured on the server. Cannot verify payment.'
+        });
       }
 
-      if (!isValid) {
-        return res.status(400).json({ success: false, message: 'Payment verification signature failed.' });
+      const body = razorpay_order_id + '|' + razorpay_payment_id;
+      const expectedSignature = crypto
+        .createHmac('sha256', config.keySecret)
+        .update(body.toString())
+        .digest('hex');
+
+      if (expectedSignature.toLowerCase() !== razorpay_signature.toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          message: 'Cryptographic signature verification failed. Payment was not confirmed by Razorpay.'
+        });
       }
 
       const plans = db.housePlans || defaultHousePlans;
       const plan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId);
 
-      // Record order in db.enquiries for admin oversight
-      const paymentId = razorpay_payment_id || `PAY_${Date.now()}`;
+      // Record genuine verified purchase in db.enquiries for admin records
+      const paymentId = razorpay_payment_id;
       const newEnquiry: Enquiry = {
         id: `cad_order_${Date.now()}`,
         name: clientName || 'Verified Homeowner',
@@ -1206,13 +1198,16 @@ async function startServer() {
       db.enquiries.unshift(newEnquiry);
       writeDB(db);
 
-      const downloadUrl = `/api/house-plans/${plan?.id || planId}/download-cad?order_id=${razorpay_order_id}&payment_id=${paymentId}`;
+      const secret = config.keySecret || DOWNLOAD_SECRET;
+      const downloadToken = generateDownloadToken(plan?.id || planId, paymentId, secret);
+      const downloadUrl = `/api/download?planId=${encodeURIComponent(plan?.id || planId)}&token=${encodeURIComponent(downloadToken)}&paymentId=${encodeURIComponent(paymentId)}`;
 
       return res.json({
         success: true,
         verified: true,
         message: 'Payment verified successfully! Your CAD & PDF package is ready for download.',
         downloadUrl,
+        downloadToken,
         paymentId,
         orderId: razorpay_order_id,
         planCode: plan?.planCode,
@@ -1223,19 +1218,99 @@ async function startServer() {
       console.error('Error verifying Razorpay payment:', err);
       res.status(500).json({ success: false, message: err.message || 'Payment verification failed' });
     }
-  });
+  };
 
-  // --- HOUSE PLANS CAD & PDF DOWNLOAD ENDPOINT ---
-  app.get('/api/house-plans/:id/download-cad', async (req, res) => {
+  app.post('/api/payments/verify', handleVerifyPayment);
+  app.post('/api/razorpay/verify-payment', handleVerifyPayment);
+
+  // Claim Free Package Endpoint
+  app.post('/api/payments/claim-free', async (req, res) => {
     try {
-      const { id } = req.params;
+      const { planId, clientName, clientEmail, clientPhone, isFreePlan } = req.body;
       const db = readDB();
       const plans = db.housePlans || defaultHousePlans;
-      const idLower = (id || '').toLowerCase();
+      const plan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId);
+
+      const price = plan?.cadPackagePrice !== undefined ? plan.cadPackagePrice : 999;
+      if (price > 0 && !isFreePlan) {
+        return res.status(403).json({
+          success: false,
+          message: 'This CAD drawings package requires a paid purchase through Razorpay checkout.'
+        });
+      }
+
+      if (!clientName || !clientPhone) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide your name and mobile number to claim this package.'
+        });
+      }
+
+      const freeClaimId = `FREE_${Date.now()}`;
+      const config = await getActiveRazorpayConfig();
+      const secret = config.keySecret || DOWNLOAD_SECRET;
+      const downloadToken = generateDownloadToken(plan?.id || planId, freeClaimId, secret);
+      const downloadUrl = `/api/download?planId=${encodeURIComponent(plan?.id || planId)}&token=${encodeURIComponent(downloadToken)}&paymentId=${encodeURIComponent(freeClaimId)}`;
+
+      const newEnquiry: Enquiry = {
+        id: `free_claim_${Date.now()}`,
+        name: clientName,
+        email: clientEmail || '',
+        phone: clientPhone,
+        service: `Free CAD Download: ${plan?.planCode || planId}`,
+        message: `Claimed free CAD package for ${plan?.title || planId}.`,
+        date: new Date().toISOString(),
+        status: 'New'
+      };
+      if (!db.enquiries) db.enquiries = [];
+      db.enquiries.unshift(newEnquiry);
+      writeDB(db);
+
+      return res.json({
+        success: true,
+        verified: true,
+        isFree: true,
+        paymentId: freeClaimId,
+        downloadToken,
+        downloadUrl
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || 'Failed to claim free download' });
+    }
+  });
+
+  // Protected Download Endpoint (Downloads are strictly gated by verified payment token)
+  const handleProtectedDownload = async (req: express.Request, res: express.Response) => {
+    try {
+      const planId = (req.query.planId || req.query.id || req.params.id || '').toString();
+      const token = (req.query.token || req.query.verified_token || '').toString();
+      const paymentId = (req.query.paymentId || req.query.payment_id || '').toString();
+
+      if (!planId) {
+        return res.status(400).json({ success: false, message: 'Plan identifier is missing.' });
+      }
+
+      const config = await getActiveRazorpayConfig();
+      const secret = config.keySecret || DOWNLOAD_SECRET;
+
+      // Strictly verify cryptographic download token
+      const isTokenValid = verifyDownloadToken(planId, paymentId, token, secret) ||
+                           verifyDownloadToken(planId, paymentId, token, DOWNLOAD_SECRET);
+
+      if (!isTokenValid) {
+        return res.status(403).json({
+          success: false,
+          message: 'Payment verification required. Downloads are strictly protected and require a verified purchase through Razorpay checkout.'
+        });
+      }
+
+      const db = readDB();
+      const plans = db.housePlans || defaultHousePlans;
+      const idLower = planId.toLowerCase();
       const plan = plans.find(p => 
-        p.id === id || 
-        p.slug === id || 
-        p.planCode === id ||
+        p.id === planId || 
+        p.slug === planId || 
+        p.planCode === planId ||
         (p.id && p.id.toLowerCase() === idLower) ||
         (p.slug && p.slug.toLowerCase() === idLower) ||
         (p.planCode && p.planCode.toLowerCase() === idLower)
@@ -1305,7 +1380,10 @@ async function startServer() {
       console.error('Error downloading attached CAD zip:', err);
       res.status(500).json({ success: false, message: 'Failed to download attached CAD package.' });
     }
-  });
+  };
+
+  app.get('/api/download', handleProtectedDownload);
+  app.get('/api/house-plans/:id/download-cad', handleProtectedDownload);
 
   // Testimonial CRUD
   app.post('/api/testimonials', (req, res) => {

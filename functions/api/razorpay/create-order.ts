@@ -1,5 +1,5 @@
 // Cloudflare Pages Function: POST /api/razorpay/create-order
-// Runs directly on Cloudflare Edge using environment variables configured in your Cloudflare dashboard
+// Real Razorpay order creation only - No sandbox/test simulations
 
 interface Env {
   RAZORPAY_KEY_ID?: string;
@@ -22,64 +22,60 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     const finalAmount = Number(amount) || 999;
     const amountInPaise = Math.round(finalAmount * 100);
 
-    const keyId = context.env.RAZORPAY_KEY_ID;
-    const keySecret = context.env.RAZORPAY_KEY_SECRET;
+    const keyId = (context.env.RAZORPAY_KEY_ID || '').trim();
+    const keySecret = (context.env.RAZORPAY_KEY_SECRET || '').trim();
 
-    if (keyId && keySecret) {
-      try {
-        const credentials = btoa(`${keyId}:${keySecret}`);
-        const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Basic ${credentials}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            amount: amountInPaise,
-            currency: 'INR',
-            receipt: `rcpt_lh_${Date.now().toString().slice(-8)}`,
-            notes: {
-              planId: planId || '',
-              clientName: clientName || '',
-              clientPhone: clientPhone || ''
-            }
-          })
-        });
-
-        if (rzpResponse.ok) {
-          const orderData: any = await rzpResponse.json();
-          return new Response(
-            JSON.stringify({
-              success: true,
-              orderId: orderData.id,
-              amount: orderData.amount,
-              currency: orderData.currency,
-              keyId: keyId,
-              testMode: false,
-              isDemo: false
-            }),
-            { status: 200, headers: corsHeaders }
-          );
-        } else {
-          const errText = await rzpResponse.text();
-          console.warn('Razorpay API error, falling back to simulated order:', errText);
-        }
-      } catch (apiErr: any) {
-        console.warn('Direct Razorpay API fetch failed:', apiErr);
-      }
+    if (!keyId || !keySecret) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message: 'Razorpay payment gateway credentials are not configured on the server. Please enter valid Key ID and Key Secret in Admin Settings.'
+        }),
+        { status: 400, headers: corsHeaders }
+      );
     }
 
-    // Fallback: simulated order if keys are pending in Cloudflare
-    const mockOrderId = `order_test_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const credentials = btoa(`${keyId}:${keySecret}`);
+    const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${credentials}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        amount: amountInPaise,
+        currency: 'INR',
+        receipt: `rcpt_lh_${Date.now().toString().slice(-8)}`,
+        notes: {
+          planId: planId || '',
+          clientName: clientName || '',
+          clientPhone: clientPhone || ''
+        }
+      })
+    });
+
+    if (!rzpResponse.ok) {
+      const errJson: any = await rzpResponse.json().catch(() => ({}));
+      const errDescription = errJson?.error?.description || errJson?.message || 'Failed to create order with Razorpay.';
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message: `Razorpay Error: ${errDescription}`
+        }),
+        { status: rzpResponse.status, headers: corsHeaders }
+      );
+    }
+
+    const orderData: any = await rzpResponse.json();
     return new Response(
       JSON.stringify({
         success: true,
-        orderId: mockOrderId,
-        amount: amountInPaise,
-        currency: 'INR',
-        keyId: keyId || 'rzp_test_demo_lifehut',
-        testMode: true,
-        isDemo: !keyId
+        orderId: orderData.id,
+        amount: orderData.amount,
+        currency: orderData.currency || 'INR',
+        keyId: keyId,
+        testMode: false,
+        isDemo: false
       }),
       { status: 200, headers: corsHeaders }
     );

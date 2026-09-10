@@ -1,6 +1,6 @@
-// Cloudflare Pages Function: POST /api/razorpay/verify-payment
+// Cloudflare Pages Function: POST /api/payments/verify
 // Cryptographically verifies Razorpay payment signature using Web Crypto HMAC-SHA256
-// No bypass or sandbox auto-verification
+// Upon genuine verification, generates a signed download token
 
 interface Env {
   RAZORPAY_KEY_SECRET?: string;
@@ -48,30 +48,30 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       clientPhone
     } = body;
 
-    const keySecret = (context.env.RAZORPAY_KEY_SECRET || '').trim();
-
-    if (!keySecret) {
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return new Response(
         JSON.stringify({
           success: false,
           verified: false,
-          message: 'Razorpay Secret Key is not configured on the server. Payment cannot be verified.'
-        }),
-        { status: 500, headers: corsHeaders }
-      );
-    }
-
-    if (!razorpay_signature || !razorpay_order_id || !razorpay_payment_id) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          verified: false,
-          message: 'Payment verification parameters missing.'
+          message: 'Missing required payment verification parameters.'
         }),
         { status: 400, headers: corsHeaders }
       );
     }
 
+    const keySecret = (context.env.RAZORPAY_KEY_SECRET || '').trim();
+    if (!keySecret) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          verified: false,
+          message: 'Razorpay Secret Key is not configured on the server. Please configure it in settings.'
+        }),
+        { status: 500, headers: corsHeaders }
+      );
+    }
+
+    // Strictly verify signature: HMAC-SHA256(order_id + '|' + payment_id, secret)
     const payload = `${razorpay_order_id}|${razorpay_payment_id}`;
     const expectedSignature = await hmacSha256(keySecret, payload);
 
@@ -80,13 +80,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
         JSON.stringify({
           success: false,
           verified: false,
-          message: 'Payment verification failed: invalid signature.'
+          message: 'Cryptographic signature verification failed. Payment was not confirmed by Razorpay.'
         }),
         { status: 400, headers: corsHeaders }
       );
     }
 
-    // Payment is verified
+    // Payment is genuinely verified! Generate time-limited signed download token (valid 24h)
     const downloadSecret = context.env.DOWNLOAD_SECRET || keySecret || 'lifehut_secure_cad_token_key';
     const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
     const tokenPayload = `${planId}:${razorpay_payment_id}:${expiresAt}`;
@@ -99,10 +99,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       JSON.stringify({
         success: true,
         verified: true,
-        message: 'Payment verified successfully! Your CAD & PDF package is ready for download.',
+        message: 'Payment verified successfully! Your CAD & PDF drawings package has been unlocked.',
         paymentId: razorpay_payment_id,
         orderId: razorpay_order_id,
-        planId: planId || '',
+        planId: planId,
         downloadToken,
         downloadUrl
       }),

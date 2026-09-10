@@ -148,68 +148,63 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const inputKeyId = (settingsForm.razorpayKeyId || '').trim();
     const inputSecret = (settingsForm.razorpayKeySecret || '').trim();
 
-    // 1. If inputs are blank, show sandbox status
-    if (!inputKeyId && !inputSecret) {
+    // 1. Credentials are required for actual payments
+    if (!inputKeyId || !inputSecret) {
       setTimeout(() => {
         setRazorpayTestStatus({
-          success: true,
-          message: 'Sandbox Simulation Active: Test checkout & automatic downloads are enabled without requiring live payment keys.'
+          success: false,
+          message: 'Both Razorpay Key ID and Key Secret are required to enable actual customer payments.'
         });
         setTestingRazorpay(false);
-      }, 300);
+      }, 200);
       return;
     }
 
     // 2. Validate Key ID format
-    if (inputKeyId && !inputKeyId.startsWith('rzp_live_') && !inputKeyId.startsWith('rzp_test_')) {
+    if (!inputKeyId.startsWith('rzp_live_') && !inputKeyId.startsWith('rzp_test_')) {
       setTimeout(() => {
         setRazorpayTestStatus({
           success: false,
           message: `Key ID format should begin with 'rzp_live_' or 'rzp_test_'. Received: "${inputKeyId.slice(0, 12)}..."`
         });
         setTestingRazorpay(false);
-      }, 300);
-      return;
-    }
-
-    if (inputKeyId && !inputSecret) {
-      setTimeout(() => {
-        setRazorpayTestStatus({
-          success: false,
-          message: 'Please also enter your Razorpay Key Secret alongside the Key ID to verify credentials.'
-        });
-        setTestingRazorpay(false);
-      }, 300);
+      }, 200);
       return;
     }
 
     try {
-      // 3. Attempt server verification endpoint safely
-      const res = await fetch('/api/razorpay/test-keys', {
+      // 3. Attempt server verification endpoint
+      let res = await fetch('/api/payments/test-keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ keyId: inputKeyId, keySecret: inputSecret })
       }).catch(() => null);
 
+      if (!res || res.status === 404) {
+        res = await fetch('/api/razorpay/test-keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keyId: inputKeyId, keySecret: inputSecret })
+        }).catch(() => null);
+      }
+
       const contentType = res?.headers?.get('content-type') || '';
 
-      if (res && res.ok && contentType.includes('application/json')) {
+      if (res && contentType.includes('application/json')) {
         const data = await res.json().catch(() => null);
         if (data && typeof data.success === 'boolean') {
           setRazorpayTestStatus({
             success: data.success,
-            message: data.message || (data.success ? 'Gateway connection verified!' : 'Credentials rejected by gateway.')
+            message: data.message || (data.success ? 'Gateway connection verified!' : 'Credentials rejected by Razorpay.')
           });
           setTestingRazorpay(false);
           return;
         }
       }
 
-      // If backend returned HTML (static SPA preview) or timed out, validate client-side format
+      // If backend returned HTML (e.g. static preview) or network failed
       const isLive = inputKeyId.startsWith('rzp_live_');
-      const isTest = inputKeyId.startsWith('rzp_test_');
-
-      if ((isLive || isTest) && inputSecret.length >= 8) {
+      if (inputSecret.length >= 8) {
         setRazorpayTestStatus({
           success: true,
           message: isLive 
@@ -218,17 +213,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         });
       } else {
         setRazorpayTestStatus({
-          success: true,
-          message: 'Gateway credentials saved. Safe checkout mode active.'
+          success: false,
+          message: 'Razorpay Key Secret is too short. Please verify your API secret.'
         });
       }
-    } catch {
-      const isLive = inputKeyId.startsWith('rzp_live_');
+    } catch (err: any) {
       setRazorpayTestStatus({
-        success: Boolean(inputKeyId && inputSecret),
-        message: inputKeyId && inputSecret
-          ? `Credentials Format Verified (${isLive ? 'Live' : 'Test'}). Key ID: ${inputKeyId.slice(0, 14)}...`
-          : 'Sandbox Simulation Active: Test checkout enabled.'
+        success: false,
+        message: `Connection test error: ${err?.message || 'Network error'}`
       });
     } finally {
       setTestingRazorpay(false);
@@ -1544,9 +1536,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl text-[11px] text-blue-900 flex items-start gap-2">
-                <span className="font-bold text-blue-700 flex-shrink-0">Tip:</span>
+                <span className="font-bold text-blue-700 flex-shrink-0">Actual Payments:</span>
                 <span>
-                  When Razorpay API keys are configured, clients complete seamless payments via UPI (Google Pay, PhonePe, Paytm), NetBanking, or Credit/Debit Cards. If left blank, simulated sandbox checkout is automatically enabled so you and clients can test instant downloads without charges.
+                  Configure your Razorpay Key ID and Secret to process actual UPI (Google Pay, PhonePe, Paytm), NetBanking, and Card payments. All architectural CAD drawings and high-resolution PDF blueprints are strictly protected and only unlocked after authentic payment confirmation.
                 </span>
               </div>
 

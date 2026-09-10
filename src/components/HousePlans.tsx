@@ -95,6 +95,7 @@ export const HousePlans: React.FC<HousePlansProps> = ({
   const [razorpayLoading, setRazorpayLoading] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [paymentTxnId, setPaymentTxnId] = useState<string | null>(null);
+  const [authorizedDownloadUrl, setAuthorizedDownloadUrl] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [downloadingCadFile, setDownloadingCadFile] = useState(false);
 
@@ -213,16 +214,37 @@ export const HousePlans: React.FC<HousePlansProps> = ({
     }
     setPaymentSuccess(false);
     setPaymentTxnId(null);
+    setAuthorizedDownloadUrl(null);
     setPaymentError(null);
     setIsPdfModalOpen(true);
   };
 
-  const triggerDownloadCadZip = (plan: HousePlan) => {
+  const triggerDownloadCadZip = (plan: HousePlan, overrideUrl?: string | null) => {
+    const targetUrl = overrideUrl || authorizedDownloadUrl;
+
+    // Security Gate: Paid packages require verified payment URL
+    if (!targetUrl && (plan.cadPackagePrice || 0) > 0) {
+      setPaymentError('Payment verification required. Please complete Razorpay checkout to unlock and download this drawings package.');
+      return;
+    }
+
     setDownloadingCadFile(true);
     try {
-      const attachedUrl = plan.cadPackageZipUrl;
       const fileName = plan.cadPackageFileName || `${plan.planCode}-Drawings.zip`;
 
+      // 1. If an authorized token-protected URL was issued by the server
+      if (targetUrl) {
+        const link = document.createElement('a');
+        link.href = targetUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      // 2. Fallback for free plans (price === 0)
+      const attachedUrl = plan.cadPackageZipUrl;
       if (!attachedUrl) {
         // Generate an official architectural package receipt & drawing manifest download
         const manifestText = `=====================================================
@@ -233,13 +255,10 @@ Plan Code: ${plan.planCode}
 Title: ${plan.title}
 Plot Dimension: ${plan.plotDimensions}
 Built-up Area: ${plan.builtUpArea} sq.ft
-Price Paid: ₹${plan.cadPackagePrice || 999}
+Price Paid: ₹${plan.cadPackagePrice || 0}
 Deliverable Package: AutoCAD DWG 2D/3D + Structural Schedules + High-Res PDF Blueprints
 
-STATUS: Payment Verified & Logged
-Our Chief Structural Engineering Desk has logged your order.
-The complete digital DWG bundle will also be emailed & WhatsApped directly to you.
-
+STATUS: Free Package Claimed
 Contact Engineering Support:
 Phone / WhatsApp: +91 80721 63330
 Email: lifehutdevelopers@gmail.com
@@ -263,22 +282,12 @@ Chennai, Tamil Nadu
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-      } else if (attachedUrl.startsWith('http://') || attachedUrl.startsWith('https://')) {
-        // Direct attached Cloud/CDN link (Supabase, S3, Cloudflare, Drive, Dropbox)
+      } else {
         const link = document.createElement('a');
         link.href = attachedUrl;
         link.download = fileName;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } else {
-        // Local uploaded zip path (e.g. /uploads/cad-packages/... or /api/house-plans/:id/download-cad)
-        const downloadUrl = `/api/house-plans/${plan.id}/download-cad`;
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.download = fileName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -324,8 +333,35 @@ Chennai, Tamil Nadu
     setPaymentError(null);
 
     try {
-      // 1. Create Order on server
-      const orderRes = await fetch('/api/razorpay/create-order', {
+      // 0. Handle Free Plans without payment
+      if ((currentCadPlan.cadPackagePrice || 0) <= 0) {
+        let claimRes = await fetch('/api/payments/claim-free', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planId: currentCadPlan.id,
+            clientName,
+            clientPhone,
+            clientEmail,
+            isFreePlan: true
+          })
+        }).catch(() => null);
+
+        const claimData = claimRes && claimRes.ok ? await claimRes.json().catch(() => null) : null;
+        if (claimData && claimData.downloadUrl) {
+          setAuthorizedDownloadUrl(claimData.downloadUrl);
+          setPaymentTxnId(claimData.paymentId);
+          setPaymentSuccess(true);
+          triggerDownloadCadZip(currentCadPlan, claimData.downloadUrl);
+        } else {
+          setPaymentError(claimData?.message || 'Could not claim free download. Please contact support.');
+        }
+        setRazorpayLoading(false);
+        return;
+      }
+
+      // 1. Create Order on server (Actual Razorpay order only)
+      let orderRes = await fetch('/api/payments/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -335,157 +371,148 @@ Chennai, Tamil Nadu
           clientEmail,
           amount: currentCadPlan.cadPackagePrice || 999
         })
-      });
+      }).catch(() => null);
+
+      if (!orderRes || orderRes.status === 404) {
+        orderRes = await fetch('/api/razorpay/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planId: currentCadPlan.id,
+            clientName,
+            clientPhone,
+            clientEmail,
+            amount: currentCadPlan.cadPackagePrice || 999
+          })
+        }).catch(() => null);
+      }
+
+      if (!orderRes) {
+        throw new Error('Network error: Unable to reach the payment server.');
+      }
 
       const orderContentType = orderRes.headers.get('content-type') || '';
       let orderData: any = null;
 
-      if (orderRes.ok && orderContentType.includes('application/json')) {
+      if (orderContentType.includes('application/json')) {
         orderData = await orderRes.json().catch(() => null);
-      } else if (!orderRes.ok && orderContentType.includes('application/json')) {
-        const errorJson = await orderRes.json().catch(() => null);
-        throw new Error(errorJson?.message || 'Could not initiate Razorpay checkout order.');
       }
 
-      // Safe fallback if running in client-side / static preview mode where API endpoint returned HTML
-      if (!orderData || !orderData.orderId) {
-        orderData = {
-          success: true,
-          orderId: `order_test_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          amount: (currentCadPlan.cadPackagePrice || 999) * 100,
-          currency: 'INR',
-          keyId: 'rzp_test_lifehut_demo',
-          testMode: true,
-          isDemo: true
-        };
+      if (!orderRes.ok || !orderData || !orderData.orderId || !orderData.keyId) {
+        const errorMsg = orderData?.message || 'Razorpay order creation failed. Please check your Razorpay credentials in Admin Settings.';
+        throw new Error(errorMsg);
       }
 
-      // Complete payment verification helper
-      const completeVerification = async (paymentDetails: {
-        orderId: string;
-        paymentId: string;
-        signature?: string;
-      }) => {
-        try {
-          const verifyRes = await fetch('/api/razorpay/verify-payment', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              razorpay_order_id: paymentDetails.orderId,
-              razorpay_payment_id: paymentDetails.paymentId,
-              razorpay_signature: paymentDetails.signature || 'sandbox_verified',
-              planId: currentCadPlan.id,
-              clientName,
-              clientPhone,
-              clientEmail,
-              notes: orderData.testMode ? 'Sandbox Simulation Order' : 'Live Razorpay Checkout'
-            })
-          }).catch(() => null);
-
-          const verifyContentType = verifyRes?.headers?.get('content-type') || '';
-          let verifyData: any = null;
-
-          if (verifyRes && verifyRes.ok && verifyContentType.includes('application/json')) {
-            verifyData = await verifyRes.json().catch(() => null);
-          }
-
-          if (!verifyData) {
-            // Fallback for static/offline preview
-            verifyData = {
-              success: true,
-              verified: true,
-              paymentId: paymentDetails.paymentId
-            };
-          }
-
-          if (verifyData.verified || verifyData.success) {
-            const confirmedTxnId = verifyData.paymentId || paymentDetails.paymentId;
-            setPaymentTxnId(confirmedTxnId);
-            setPaymentSuccess(true);
-
-            // Log customer enquiry in database
-            fetch('/api/enquiries', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                name: clientName,
-                phone: clientPhone,
-                email: clientEmail,
-                service: `CAD & PDF Download: ${currentCadPlan.planCode}`,
-                requirement: `Purchased architectural drawings package for ${currentCadPlan.title} (₹${currentCadPlan.cadPackagePrice || 999}). Razorpay Txn: ${confirmedTxnId}`
-              })
-            }).catch(() => {});
-
-            triggerDownloadCadZip(currentCadPlan);
-          } else {
-            setPaymentError(verifyData.message || 'Payment verification failed.');
-          }
-        } catch (err: any) {
-          setPaymentError('Verification failed: ' + (err?.message || 'Network error'));
-        } finally {
-          setRazorpayLoading(false);
-        }
-      };
-
-      // A) Handle Sandbox / Demo test mode
-      if (orderData.testMode || orderData.isDemo || orderData.orderId?.startsWith('order_test_')) {
-        const demoPaymentId = `PAY_DEMO_${Date.now().toString().slice(-8)}`;
-        await completeVerification({
-          orderId: orderData.orderId,
-          paymentId: demoPaymentId,
-          signature: 'sandbox_test_signature'
-        });
-        return;
-      }
-
-      // B) Handle Live / Real Razorpay Checkout
+      // 2. Load Razorpay Checkout SDK
       const scriptLoaded = await loadRazorpayScript();
       const RazorpayConstructor = (window as any).Razorpay;
 
-      if (scriptLoaded && RazorpayConstructor && orderData.keyId) {
-        const rzpOptions = {
-          key: orderData.keyId,
-          amount: orderData.amount,
-          currency: orderData.currency || 'INR',
-          name: 'Lifehut Developers',
-          description: `${currentCadPlan.planCode} Full CAD & PDF Drawings Package`,
-          image: 'https://lifehutdevelopers.com/favicon.png',
-          order_id: orderData.orderId,
-          handler: async function (response: any) {
-            await completeVerification({
-              orderId: response.razorpay_order_id,
-              paymentId: response.razorpay_payment_id,
-              signature: response.razorpay_signature
-            });
-          },
-          prefill: {
-            name: clientName,
-            email: clientEmail || '',
-            contact: clientPhone
-          },
-          notes: {
-            planCode: currentCadPlan.planCode,
-            title: currentCadPlan.title
-          },
-          theme: {
-            color: '#1A6DB5'
-          }
-        };
-
-        const rzp = new RazorpayConstructor(rzpOptions);
-        rzp.on('payment.failed', function (response: any) {
-          setRazorpayLoading(false);
-          setPaymentError(response.error?.description || 'Payment was cancelled or declined.');
-        });
-        rzp.open();
-      } else {
-        // If Razorpay JS could not be initialized, fall back to sandbox completion so user is never blocked
-        const fallbackPaymentId = `PAY_DIRECT_${Date.now().toString().slice(-8)}`;
-        await completeVerification({
-          orderId: orderData.orderId,
-          paymentId: fallbackPaymentId
-        });
+      if (!scriptLoaded || !RazorpayConstructor) {
+        throw new Error('Could not load Razorpay checkout script. Please check your internet connection and try again.');
       }
+
+      // 3. Open Real Razorpay Checkout
+      const rzpOptions = {
+        key: orderData.keyId,
+        amount: orderData.amount,
+        currency: orderData.currency || 'INR',
+        name: 'Lifehut Developers',
+        description: `${currentCadPlan.planCode} Full CAD & PDF Drawings Package`,
+        image: 'https://lifehutdevelopers.com/favicon.png',
+        order_id: orderData.orderId,
+        modal: {
+          ondismiss: function () {
+            setRazorpayLoading(false);
+          }
+        },
+        handler: async function (response: any) {
+          // This callback ONLY runs if the customer successfully completed payment in the Razorpay gateway
+          try {
+            setRazorpayLoading(true);
+
+            if (!response.razorpay_order_id || !response.razorpay_payment_id || !response.razorpay_signature) {
+              setPaymentError('Payment confirmation missing credentials. Please contact support.');
+              setRazorpayLoading(false);
+              return;
+            }
+
+            // Cryptographically verify signature on the server
+            let verifyRes = await fetch('/api/payments/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                planId: currentCadPlan.id,
+                clientName,
+                clientPhone,
+                clientEmail,
+                notes: 'Live Razorpay Checkout'
+              })
+            }).catch(() => null);
+
+            if (!verifyRes || verifyRes.status === 404) {
+              verifyRes = await fetch('/api/razorpay/verify-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                  planId: currentCadPlan.id,
+                  clientName,
+                  clientPhone,
+                  clientEmail,
+                  notes: 'Live Razorpay Checkout'
+                })
+              }).catch(() => null);
+            }
+
+            const verifyData = verifyRes && verifyRes.ok ? await verifyRes.json().catch(() => null) : null;
+
+            if (verifyData && (verifyData.verified || verifyData.success) && verifyData.downloadUrl) {
+              const confirmedTxnId = verifyData.paymentId || response.razorpay_payment_id;
+              setPaymentTxnId(confirmedTxnId);
+              setAuthorizedDownloadUrl(verifyData.downloadUrl);
+              setPaymentSuccess(true);
+              setPaymentError(null);
+
+              // Auto trigger verified download
+              triggerDownloadCadZip(currentCadPlan, verifyData.downloadUrl);
+            } else {
+              setPaymentError(
+                verifyData?.message ||
+                `Payment verification failed. If your money was deducted, please share Payment ID (${response.razorpay_payment_id}) on WhatsApp.`
+              );
+            }
+          } catch (verifyErr: any) {
+            console.error('Verification network error:', verifyErr);
+            setPaymentError('Payment verification network error. Please contact support.');
+          } finally {
+            setRazorpayLoading(false);
+          }
+        },
+        prefill: {
+          name: clientName,
+          email: clientEmail || '',
+          contact: clientPhone
+        },
+        notes: {
+          planCode: currentCadPlan.planCode,
+          title: currentCadPlan.title
+        },
+        theme: {
+          color: '#1A6DB5'
+        }
+      };
+
+      const rzp = new RazorpayConstructor(rzpOptions);
+      rzp.on('payment.failed', function (response: any) {
+        setRazorpayLoading(false);
+        setPaymentError(response.error?.description || 'Payment was cancelled or declined.');
+      });
+      rzp.open();
     } catch (err: any) {
       console.error('Razorpay process failed:', err);
       setPaymentError(err?.message || 'An error occurred while connecting to Razorpay.');
@@ -2140,9 +2167,9 @@ Chennai, Tamil Nadu
                   </div>
 
                   <div className="pt-2 space-y-2.5 max-w-sm mx-auto">
-                    {currentCadPlan.cadPackageZipUrl ? (
+                    {currentCadPlan.cadPackageZipUrl || authorizedDownloadUrl ? (
                       <button
-                        onClick={() => triggerDownloadCadZip(currentCadPlan)}
+                        onClick={() => triggerDownloadCadZip(currentCadPlan, authorizedDownloadUrl)}
                         disabled={downloadingCadFile}
                         className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-soft transition-all cursor-pointer flex items-center justify-center gap-2"
                       >

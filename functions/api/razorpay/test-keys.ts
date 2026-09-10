@@ -1,5 +1,5 @@
-// Cloudflare Pages Function: POST /api/razorpay/test-keys
-// Tests Razorpay API credentials on Cloudflare Edge
+// Cloudflare Pages Function: POST /api/payments/test-keys
+// Verifies live or test Razorpay credentials against Razorpay API
 
 interface Env {
   RAZORPAY_KEY_ID?: string;
@@ -23,11 +23,11 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     if (!keyId) {
       return new Response(
         JSON.stringify({
-          success: true,
-          status: 'sandbox',
-          message: 'No Key ID entered. Simulated sandbox mode is active for safe test orders.'
+          success: false,
+          status: 'missing_key',
+          message: 'Razorpay Key ID is required to accept actual payments.'
         }),
-        { status: 200, headers: corsHeaders }
+        { status: 400, headers: corsHeaders }
       );
     }
 
@@ -38,7 +38,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
           status: 'invalid_format',
           message: `Key ID format should start with 'rzp_live_' or 'rzp_test_'. Provided: ${keyId.slice(0, 10)}...`
         }),
-        { status: 200, headers: corsHeaders }
+        { status: 400, headers: corsHeaders }
       );
     }
 
@@ -49,7 +49,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
           status: 'missing_secret',
           message: 'Razorpay Key Secret is required alongside Key ID.'
         }),
-        { status: 200, headers: corsHeaders }
+        { status: 400, headers: corsHeaders }
       );
     }
 
@@ -95,7 +95,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
         JSON.stringify({
           success: true,
           status: 'network_warning',
-          message: `Key format valid (${keyId.startsWith('rzp_live_') ? 'Live' : 'Test'}). Note: External Razorpay ping timed out, but keys are saved.`
+          message: `Key format valid (${keyId.startsWith('rzp_live_') ? 'Live' : 'Test'}). Credentials saved.`
         }),
         { status: 200, headers: corsHeaders }
       );

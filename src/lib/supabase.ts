@@ -216,15 +216,11 @@ function updateLocalProjectMetadata(id: string, meta: ProjectMetadataItem) {
 async function persistProjectMetaToSupabase(id: string, meta: ProjectMetadataItem): Promise<boolean> {
   if (!supabase) return false;
   try {
-    let { data } = await supabase.from('settings').select('stats').limit(1);
-    let table = 'settings';
-    if (!data || data.length === 0) {
-      const res = await supabase.from('site_settings').select('stats').limit(1);
-      data = res.data;
-      table = 'site_settings';
-    }
+    const { data } = await supabase.from('settings').select('*').limit(1);
+    if (!data || data.length === 0) return false;
 
-    const currentStats = (data && data[0] && typeof data[0].stats === 'object') ? data[0].stats : {};
+    const row = data[0];
+    const currentStats = (row.stats && typeof row.stats === 'object') ? row.stats : {};
     const metaMap = { ...(currentStats.project_metadata_map || {}) };
     metaMap[id] = { ...(metaMap[id] || {}), ...meta };
 
@@ -233,19 +229,13 @@ async function persistProjectMetaToSupabase(id: string, meta: ProjectMetadataIte
       project_metadata_map: metaMap
     };
 
-    const patchRes = await supabase.from(table).update({
+    const rowId = row.id || 'site_settings';
+    const { error } = await supabase.from('settings').update({
       stats: updatedStats,
       updated_at: new Date().toISOString()
-    }).eq('id', 'site_settings');
+    }).eq('id', rowId);
 
-    if (patchRes.error) {
-      await supabase.from(table).upsert({
-        id: 'site_settings',
-        stats: updatedStats,
-        updated_at: new Date().toISOString()
-      });
-    }
-    return true;
+    return !error;
   } catch (err) {
     console.warn('Auto meta persistence to Supabase settings:', err);
     return false;
@@ -256,11 +246,7 @@ async function persistProjectMetaToSupabase(id: string, meta: ProjectMetadataIte
 async function fetchProjectMetaFromSupabase(): Promise<Record<string, ProjectMetadataItem>> {
   if (!supabase) return {};
   try {
-    let { data } = await supabase.from('settings').select('stats').limit(1);
-    if (!data || data.length === 0) {
-      const res = await supabase.from('site_settings').select('stats').limit(1);
-      data = res.data;
-    }
+    const { data } = await supabase.from('settings').select('stats').limit(1);
     if (data && data[0]?.stats?.project_metadata_map) {
       return data[0].stats.project_metadata_map;
     }
@@ -678,10 +664,7 @@ export async function insertSupabaseQuote(quote: QuoteRequest): Promise<boolean>
 // --- SETTINGS DB HELPERS ---
 export async function fetchSupabaseSettings(): Promise<Settings | null> {
   if (!supabase) return null;
-  let res = await supabase.from('settings').select('*').limit(1);
-  if (res.error || !res.data || res.data.length === 0) {
-    res = await supabase.from('site_settings').select('*').limit(1);
-  }
+  const res = await supabase.from('settings').select('*').limit(1);
   if (res.error || !res.data || res.data.length === 0) {
     console.warn('No existing settings found in Supabase:', res.error?.message);
     return null;
@@ -709,32 +692,38 @@ export async function fetchSupabaseSettings(): Promise<Settings | null> {
       experienceYears: "7+",
       clientSatisfaction: "99%",
       hiddenCharges: "₹0"
-    }
+    },
+    razorpayKeyId: data.razorpayKeyId || data.stats?.razorpayKeyId || '',
+    razorpayKeySecret: data.razorpayKeySecret || data.stats?.razorpayKeySecret || '',
+    razorpayEnabled: data.razorpayEnabled !== undefined ? data.razorpayEnabled : (data.stats?.razorpayEnabled !== undefined ? data.stats.razorpayEnabled : true)
   };
 }
 
 export async function saveSupabaseSettings(settings: Settings): Promise<boolean> {
   if (!supabase) return false;
 
-  // Retrieve existing stats so we preserve project_metadata_map and house_plans
+  // Retrieve existing stats and primary key row id
+  let existingRowId: any = null;
   let existingStats: any = {};
   try {
-    let res = await supabase.from('settings').select('stats').limit(1);
-    if (res.error || !res.data || res.data.length === 0) {
-      res = await supabase.from('site_settings').select('stats').limit(1);
-    }
-    if (res.data && res.data[0]?.stats && typeof res.data[0].stats === 'object') {
-      existingStats = res.data[0].stats;
+    const res = await supabase.from('settings').select('*').limit(1);
+    if (res.data && res.data.length > 0) {
+      existingRowId = res.data[0].id;
+      if (res.data[0].stats && typeof res.data[0].stats === 'object') {
+        existingStats = res.data[0].stats;
+      }
     }
   } catch {}
 
   const mergedStats = {
     ...existingStats,
-    ...(settings.stats || {})
+    ...(settings.stats || {}),
+    razorpayKeyId: settings.razorpayKeyId || existingStats.razorpayKeyId || '',
+    razorpayKeySecret: settings.razorpayKeySecret || existingStats.razorpayKeySecret || '',
+    razorpayEnabled: settings.razorpayEnabled !== undefined ? settings.razorpayEnabled : (existingStats.razorpayEnabled !== undefined ? existingStats.razorpayEnabled : true)
   };
 
-  const payload = {
-    id: 'site_settings',
+  const payload: any = {
     hero_title: settings.heroTitle,
     hero_subtitle: settings.heroSubtitle,
     hero_banner_image: settings.heroBannerImage,
@@ -755,17 +744,24 @@ export async function saveSupabaseSettings(settings: Settings): Promise<boolean>
     updated_at: new Date().toISOString()
   };
 
-  let { error } = await supabase.from('settings').upsert(payload);
-  if (error) {
-    console.warn('Upsert to settings failed, trying site_settings table:', error.message);
-    const retry = await supabase.from('site_settings').upsert(payload);
-    if (!retry.error) {
-      error = null;
-    } else {
-      console.error('Error saving settings to Supabase:', retry.error);
+  // 1. If row already exists in settings, perform an UPDATE (PATCH).
+  // This avoids 405 Method Not Allowed on PostgREST upsert (POST)!
+  if (existingRowId !== null) {
+    const { error: updateError } = await supabase.from('settings').update(payload).eq('id', existingRowId);
+    if (!updateError) {
+      return true;
     }
+    console.warn('Update to settings failed, trying upsert:', updateError.message);
   }
-  return !error;
+
+  // 2. Otherwise insert or upsert with fallback id
+  payload.id = existingRowId || 'site_settings';
+  const { error: upsertError } = await supabase.from('settings').upsert(payload);
+  if (upsertError) {
+    console.error('Error saving settings to Supabase:', upsertError.message);
+    return false;
+  }
+  return true;
 }
 
 // --- TESTIMONIALS DB HELPERS ---
@@ -863,11 +859,8 @@ export async function fetchSupabaseHousePlans(): Promise<HousePlan[] | null> {
         return plans;
       }
 
-      // If 'house_plans' table does not exist or empty, check site_settings.stats.house_plans fallback
-      let settingsRes = await supabase.from('settings').select('*').limit(1);
-      if (settingsRes.error || !settingsRes.data || settingsRes.data.length === 0) {
-        settingsRes = await supabase.from('site_settings').select('*').limit(1);
-      }
+      // If 'house_plans' table does not exist or empty, check settings.stats.house_plans fallback
+      const settingsRes = await supabase.from('settings').select('*').limit(1);
       if (!settingsRes.error && settingsRes.data && settingsRes.data[0]?.stats?.house_plans) {
         const storedPlans = settingsRes.data[0].stats.house_plans;
         if (Array.isArray(storedPlans) && storedPlans.length > 0) {
@@ -976,15 +969,9 @@ export async function saveSupabaseHousePlan(plan: HousePlan): Promise<boolean> {
 
   const { error } = await supabase.from('house_plans').upsert(payload);
   if (error) {
-    console.warn('Direct house_plans upsert failed (table may not exist yet), saving to site_settings fallback:', error.message);
-    // Seamless fallback to site_settings table
+    console.warn('Direct house_plans upsert failed (table may not exist yet), saving to settings stats fallback:', error.message);
     try {
-      let res = await supabase.from('settings').select('*').limit(1);
-      let targetTable = 'settings';
-      if (res.error || !res.data || res.data.length === 0) {
-        res = await supabase.from('site_settings').select('*').limit(1);
-        targetTable = 'site_settings';
-      }
+      const res = await supabase.from('settings').select('*').limit(1);
       if (res.data && res.data.length > 0) {
         const row = res.data[0];
         const existingPlans: HousePlan[] = Array.isArray(row.stats?.house_plans) ? row.stats.house_plans : [...defaultHousePlans];
@@ -995,7 +982,8 @@ export async function saveSupabaseHousePlan(plan: HousePlan): Promise<boolean> {
           existingPlans.unshift(plan);
         }
         const updatedStats = { ...row.stats, house_plans: existingPlans };
-        await supabase.from(targetTable).upsert({ ...row, stats: updatedStats, updated_at: new Date().toISOString() });
+        const rowId = row.id || 'site_settings';
+        await supabase.from('settings').update({ stats: updatedStats, updated_at: new Date().toISOString() }).eq('id', rowId);
       }
     } catch (fallbackErr) {
       console.warn('Fallback settings save for house plan caught error:', fallbackErr);
@@ -1030,18 +1018,14 @@ export async function deleteSupabaseHousePlan(id: string): Promise<boolean> {
   try {
     const { error } = await supabase.from('house_plans').delete().eq('id', id);
     if (error) {
-      // Also clean up from site_settings fallback
-      let res = await supabase.from('settings').select('*').limit(1);
-      let targetTable = 'settings';
-      if (res.error || !res.data || res.data.length === 0) {
-        res = await supabase.from('site_settings').select('*').limit(1);
-        targetTable = 'site_settings';
-      }
+      // Also clean up from settings fallback
+      const res = await supabase.from('settings').select('*').limit(1);
       if (res.data && res.data.length > 0) {
         const row = res.data[0];
         if (row.stats?.house_plans && Array.isArray(row.stats.house_plans)) {
           const filtered = row.stats.house_plans.filter((p: HousePlan) => p.id !== id);
-          await supabase.from(targetTable).upsert({ ...row, stats: { ...row.stats, house_plans: filtered } });
+          const rowId = row.id || 'site_settings';
+          await supabase.from('settings').update({ stats: { ...row.stats, house_plans: filtered } }).eq('id', rowId);
         }
       }
     }
@@ -1065,13 +1049,7 @@ export async function autoMigrateAndSyncSupabase(): Promise<void> {
 
   try {
     // 1. Fetch current settings row
-    let res = await supabase.from('settings').select('*').limit(1);
-    let table = 'settings';
-    if (res.error || !res.data || res.data.length === 0) {
-      res = await supabase.from('site_settings').select('*').limit(1);
-      table = 'site_settings';
-    }
-
+    const res = await supabase.from('settings').select('*').limit(1);
     const settingsRow = res.data && res.data.length > 0 ? res.data[0] : null;
     const currentStats = (settingsRow && typeof settingsRow.stats === 'object') ? settingsRow.stats : {};
     const remoteMetaMap = { ...(currentStats.project_metadata_map || {}) };
@@ -1162,7 +1140,7 @@ export async function autoMigrateAndSyncSupabase(): Promise<void> {
       };
 
       if (settingsRow) {
-        await supabase.from(table).update({
+        await supabase.from('settings').update({
           stats: mergedStats,
           updated_at: new Date().toISOString()
         }).eq('id', settingsRow.id);
