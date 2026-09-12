@@ -23,9 +23,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     if (!keyId) {
       return new Response(
         JSON.stringify({
-          success: true,
-          status: 'sandbox',
-          message: 'No Key ID entered. Simulated sandbox mode is active for safe test orders.'
+          success: false,
+          status: 'missing_key',
+          message: 'Razorpay Key ID is required to accept actual payments. Please enter Key ID.'
         }),
         { status: 200, headers: corsHeaders }
       );

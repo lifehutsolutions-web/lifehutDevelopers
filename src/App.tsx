@@ -371,6 +371,7 @@ export default function App() {
                 setActiveTab={setActiveTab}
                 initialSelectedSlug={selectedPlanSlug}
                 phone={phone}
+                settings={settings}
               />
             </motion.div>
           )}

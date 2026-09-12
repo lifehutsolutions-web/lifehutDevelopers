@@ -62,11 +62,25 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       }
     }
 
-    if (!keyId || !keySecret) {
+    const isPlaceholder = !keyId ||
+      keyId === 'rzp_test_demo_lifehut' ||
+      keyId === 'rzp_test_lifehut_demo' ||
+      keySecret === 'demo_secret_12345' ||
+      keyId.includes('placeholder') ||
+      keySecret.length < 8;
+
+    const isRealRazorpay = Boolean(
+      keyId &&
+      keySecret &&
+      keyId.startsWith('rzp_') &&
+      !isPlaceholder
+    );
+
+    if (!isRealRazorpay) {
       return new Response(
         JSON.stringify({
           success: false,
-          message: 'Razorpay credentials (Key ID and Secret) are missing or not configured in Cloudflare Environment Variables or Admin Settings. Please visit /api/payments/debug-env to inspect environment.'
+          message: 'Razorpay credentials (Key ID and Secret) are not configured. Please enter your Razorpay keys in Admin Settings or configure RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Cloudflare environment variables.'
         }),
         { status: 400, headers: corsHeaders }
       );

@@ -1471,11 +1471,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       Razorpay Payment Gateway Configuration
                       {settingsForm.razorpayKeyId ? (
                         <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold">
-                          Live Active
+                          Configured
                         </span>
                       ) : (
-                        <span className="text-[10px] font-mono px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full font-bold">
-                          Sandbox / Demo Active
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full font-bold">
+                          Not Configured
                         </span>
                       )}
                     </h4>

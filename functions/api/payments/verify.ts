@@ -53,13 +53,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
         JSON.stringify({
           success: false,
           verified: false,
-          message: 'Missing required payment verification parameters.'
+          message: 'Missing required payment verification credentials (order ID, payment ID, or signature).'
         }),
         { status: 400, headers: corsHeaders }
       );
     }
 
-    let keySecret = (context.env.RAZORPAY_KEY_SECRET || '').trim();
+    let keySecret = (context.env.RAZORPAY_KEY_SECRET || body.keySecret || '').trim();
     if (!keySecret) {
       try {
         const sbUrl = context.env.VITE_SUPABASE_URL || context.env.SUPABASE_URL || 'https://vkthcqceywhdlmjsvsze.supabase.co';
@@ -87,7 +87,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
         JSON.stringify({
           success: false,
           verified: false,
-          message: 'Razorpay Secret Key is not configured on the server or Cloudflare environment variables. Please check Settings.'
+          message: 'Razorpay Secret Key is not configured on the server. Cannot verify payment.'
         }),
         { status: 500, headers: corsHeaders }
       );

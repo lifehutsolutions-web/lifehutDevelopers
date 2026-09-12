@@ -39,16 +39,18 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Breadcrumbs } from './Breadcrumbs';
-import { HousePlan } from '../types';
+import { HousePlan, Settings } from '../types';
 import { defaultHousePlans } from '../data/defaultHousePlans';
 
 interface HousePlansProps {
   housePlans?: HousePlan[];
   selectedSlug?: string | null;
+  initialSelectedSlug?: string | null;
   onSelectPlan?: (slug: string | null) => void;
   setActiveTab: (tab: string) => void;
   phone?: string;
   email?: string;
+  settings?: Settings | null;
 }
 
 export const getBuildingDimension = (plan: HousePlan): string => {
@@ -74,12 +76,14 @@ export const HousePlans: React.FC<HousePlansProps> = ({
   onSelectPlan,
   setActiveTab,
   phone = "+91 80721 63330",
-  email = "lifehutdevelopers@gmail.com"
+  email = "lifehutdevelopers@gmail.com",
+  settings = null,
+  initialSelectedSlug = null
 }) => {
   const plans = housePlans && housePlans.length > 0 ? housePlans : defaultHousePlans;
 
   // Selected plan state
-  const [currentSlug, setCurrentSlug] = useState<string | null>(selectedSlug);
+  const [currentSlug, setCurrentSlug] = useState<string | null>(selectedSlug || initialSelectedSlug || null);
   const [activeCarouselIndex, setActiveCarouselIndex] = useState(0);
   const [zoomModalImage, setZoomModalImage] = useState<string | null>(null);
   const [zoomModalTitle, setZoomModalTitle] = useState<string>('');
@@ -360,7 +364,17 @@ Chennai, Tamil Nadu
         return;
       }
 
-      // 1. Create Order on server (Actual Razorpay order only)
+      // 1. Resolve any stored Razorpay credentials from settings or local storage
+      let localCreds: { razorpayKeyId?: string; razorpayKeySecret?: string } = {};
+      try {
+        const raw = localStorage.getItem('lifehut_local_settings');
+        if (raw) localCreds = JSON.parse(raw);
+      } catch {}
+
+      const effectiveKeyId = (settings?.razorpayKeyId || localCreds.razorpayKeyId || '').trim();
+      const effectiveKeySecret = (settings?.razorpayKeySecret || localCreds.razorpayKeySecret || '').trim();
+
+      // 2. Create Order on server
       let orderRes = await fetch('/api/payments/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -369,7 +383,9 @@ Chennai, Tamil Nadu
           clientName,
           clientPhone,
           clientEmail,
-          amount: currentCadPlan.cadPackagePrice || 999
+          amount: currentCadPlan.cadPackagePrice || 999,
+          keyId: effectiveKeyId,
+          keySecret: effectiveKeySecret
         })
       }).catch(() => null);
 
@@ -382,7 +398,9 @@ Chennai, Tamil Nadu
             clientName,
             clientPhone,
             clientEmail,
-            amount: currentCadPlan.cadPackagePrice || 999
+            amount: currentCadPlan.cadPackagePrice || 999,
+            keyId: effectiveKeyId,
+            keySecret: effectiveKeySecret
           })
         }).catch(() => null);
       }
@@ -398,12 +416,12 @@ Chennai, Tamil Nadu
         orderData = await orderRes.json().catch(() => null);
       }
 
-      if (!orderRes.ok || !orderData || !orderData.orderId || !orderData.keyId) {
-        const errorMsg = orderData?.message || `Razorpay order creation failed (HTTP ${orderRes.status}). Please check credentials in Cloudflare environment variables or Admin Settings.`;
+      if (!orderRes.ok || !orderData || !orderData.orderId) {
+        const errorMsg = orderData?.message || `Order creation failed (HTTP ${orderRes.status}).`;
         throw new Error(errorMsg);
       }
 
-      // 2. Load Razorpay Checkout SDK
+      // 3. Load Razorpay Checkout SDK for Live / Production Gateway
       const scriptLoaded = await loadRazorpayScript();
       const RazorpayConstructor = (window as any).Razorpay;
 
@@ -411,9 +429,9 @@ Chennai, Tamil Nadu
         throw new Error('Could not load Razorpay checkout script. Please check your internet connection and try again.');
       }
 
-      // 3. Open Real Razorpay Checkout
+      // 5. Open Real Razorpay Checkout
       const rzpOptions = {
-        key: orderData.keyId,
+        key: orderData.keyId || effectiveKeyId,
         amount: orderData.amount,
         currency: orderData.currency || 'INR',
         name: 'Lifehut Developers',
@@ -448,7 +466,8 @@ Chennai, Tamil Nadu
                 clientName,
                 clientPhone,
                 clientEmail,
-                notes: 'Live Razorpay Checkout'
+                notes: 'Live Razorpay Checkout',
+                keySecret: effectiveKeySecret
               })
             }).catch(() => null);
 
@@ -464,7 +483,8 @@ Chennai, Tamil Nadu
                   clientName,
                   clientPhone,
                   clientEmail,
-                  notes: 'Live Razorpay Checkout'
+                  notes: 'Live Razorpay Checkout',
+                  keySecret: effectiveKeySecret
                 })
               }).catch(() => null);
             }
@@ -487,7 +507,7 @@ Chennai, Tamil Nadu
               );
             }
           } catch (verifyErr: any) {
-            console.error('Verification network error:', verifyErr);
+            console.warn('Verification network notice:', verifyErr);
             setPaymentError('Payment verification network error. Please contact support.');
           } finally {
             setRazorpayLoading(false);
@@ -514,7 +534,7 @@ Chennai, Tamil Nadu
       });
       rzp.open();
     } catch (err: any) {
-      console.error('Razorpay process failed:', err);
+      console.warn('Razorpay checkout notice:', err?.message || err);
       setPaymentError(err?.message || 'An error occurred while connecting to Razorpay.');
       setRazorpayLoading(false);
     }

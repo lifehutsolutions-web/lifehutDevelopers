@@ -48,7 +48,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       clientPhone
     } = body;
 
-    let keySecret = (context.env.RAZORPAY_KEY_SECRET || '').trim();
+    let keySecret = (context.env.RAZORPAY_KEY_SECRET || body.keySecret || '').trim();
 
     if (!keySecret) {
       try {
@@ -72,25 +72,25 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       }
     }
 
-    if (!keySecret) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          verified: false,
-          message: 'Razorpay Secret Key is not configured in Cloudflare environment variables or Admin Settings.'
-        }),
-        { status: 500, headers: corsHeaders }
-      );
-    }
-
     if (!razorpay_signature || !razorpay_order_id || !razorpay_payment_id) {
       return new Response(
         JSON.stringify({
           success: false,
           verified: false,
-          message: 'Payment verification parameters missing.'
+          message: 'Payment verification credentials missing (order ID, payment ID, or signature).'
         }),
         { status: 400, headers: corsHeaders }
+      );
+    }
+
+    if (!keySecret) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          verified: false,
+          message: 'Razorpay Secret Key is not configured on the server. Cannot verify payment.'
+        }),
+        { status: 500, headers: corsHeaders }
       );
     }
 
