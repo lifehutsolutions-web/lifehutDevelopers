@@ -559,5 +559,80 @@ export const defaultHousePlans: HousePlan[] = [
     isFeatured: true,
     isActive: true,
     createdAt: "2026-08-28"
+  },
+  {
+    id: "lh-hp-28x41-5bhk-north-30x50",
+    planCode: "LH-HP-2841",
+    title: "28x41 North Facing 5BHK House Plan for 30x50 Plot",
+    slug: "28x41-north-facing-5bhk-house-plan-for-30x50-plot",
+    floors: 3,
+    floorsLabel: "3 Storey (G+2 Triplex Luxury Villa)",
+    bedrooms: 5,
+    bathrooms: 5,
+    builtUpArea: 3150,
+    plotDimensions: "30' x 50' (1,500 sq.ft plot)",
+    buildingDimensions: "28'0\" x 41'0\"",
+    facing: "North",
+    vastuCompliant: true,
+    vastuScore: "100% Vastu Compliant",
+    vastuNotes: [
+      "Main Entrance strictly in North (Kuber / Somya zone) for financial prosperity and prestige",
+      "Pooja Room in the sacred North-East (Ishanya) corner with direct natural morning light",
+      "Kitchen in the South-East (Agneya) fire corner with East-facing culinary counter",
+      "Grand Master Suite positioned in South-West (Niruthi) earth quadrant across upper floors",
+      "Underground water sump in North-East and overhead distribution tank in South-West"
+    ],
+    style: "Contemporary Luxury Triplex Villa",
+    carParking: 2,
+    estimatedCostRange: "₹69.3 Lakhs – ₹78.7 Lakhs",
+    costPerSqft: "₹2,200 – ₹2,500 / sq.ft (Turnkey in Chennai)",
+    elevationImage: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=1200&auto=format&fit=crop",
+    floorPlanImage: "https://images.unsplash.com/photo-1600585154526-990dced4db0d?q=80&w=1000&auto=format&fit=crop",
+    galleryImages: [
+      "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=1200&auto=format&fit=crop",
+      "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?q=80&w=1200&auto=format&fit=crop",
+      "https://images.unsplash.com/photo-1613490493576-7fde63acd811?q=80&w=1200&auto=format&fit=crop"
+    ],
+    description: "A masterfully engineered 28x41 ft built-up luxury triplex house plan designed specifically for standard 30x50 ft urban plots in Chennai. Maximizes carpet area with 5 spacious en-suite bedrooms, dual covered car parking portico, double-height North-facing architectural living room, family lounge on the first floor, and an open rooftop entertainment deck on the second floor. 100% Vastu compliant with zero space loss.",
+    roomDimensions: [
+      { roomName: "2-Car Covered Portico", dimension: "17'6\" x 15'0\"", floor: "Ground Floor", vastuZone: "North-West" },
+      { roomName: "Formal Living Hall", dimension: "18'0\" x 14'6\"", floor: "Ground Floor", vastuZone: "North / North-East" },
+      { roomName: "Dining Lounge", dimension: "14'0\" x 11'6\"", floor: "Ground Floor", vastuZone: "Brahmasthan Free" },
+      { roomName: "Modular Kitchen & Utility", dimension: "12'0\" x 10'0\"", floor: "Ground Floor", vastuZone: "South-East (Agneya)" },
+      { roomName: "North-East Pooja Room", dimension: "6'0\" x 6'0\"", floor: "Ground Floor", vastuZone: "North-East (Ishanya)" },
+      { roomName: "Ground Guest Bedroom Suite", dimension: "14'0\" x 12'0\"", floor: "Ground Floor", vastuZone: "South" },
+      { roomName: "First Floor Family Living Lounge", dimension: "16'0\" x 14'0\"", floor: "First Floor", vastuZone: "North" },
+      { roomName: "Master Bedroom 1 with Dresser & Balcony", dimension: "16'6\" x 14'0\"", floor: "First Floor", vastuZone: "South-West" },
+      { roomName: "Bedroom 3 (Children Suite)", dimension: "14'0\" x 12'6\"", floor: "First Floor", vastuZone: "North-West" },
+      { roomName: "Second Floor Master Bedroom 2", dimension: "16'6\" x 14'0\"", floor: "Second Floor", vastuZone: "South-West" },
+      { roomName: "Bedroom 5 / Home Theatre / Study", dimension: "15'0\" x 13'0\"", floor: "Second Floor", vastuZone: "West" },
+      { roomName: "Open Party Terrace & Garden Deck", dimension: "20'0\" x 15'0\"", floor: "Second Floor", vastuZone: "North / East" }
+    ],
+    features: [
+      "28x41 Dimension Tailored for 30x50 Ft Chennai Plots with Side Setbacks",
+      "5 Lavish En-Suite Bedrooms Across 3 Floors (G+2 Triplex)",
+      "Dual Covered SUV Car Parking Portico",
+      "Double-Height North-Facing Living Room with Floor-to-Ceiling Windows",
+      "Dedicated Pooja Room in North-East (Ishanya Corner)",
+      "Fe 550D TMT Earthquake Resistant RCC Column Reinforcement Schedule"
+    ],
+    cadPackagePrice: 1499,
+    cadPackageFileName: "LH-HP-2841-28x41-North-Facing-5BHK-CAD-Package.zip",
+    cadPackageSize: "32.4 MB",
+    cadPackageIncludes: [
+      "Complete AutoCAD DWG Vector Blueprints (Floor plans, Elevations, Sections)",
+      "High-Resolution Architectural PDF Working Drawings",
+      "Structural Engineering Column, Plinth Beam & Footing Details",
+      "Vastu Shastra 16-Zone Precision Compass Orientation Chart",
+      "Plumbing, Drainage & Concealed Electrical Wiring Schematics"
+    ],
+    seoMeta: {
+      title: "28x41 North Facing 5BHK House Plan for 30x50 Plot | Lifehut",
+      description: "28x41 ft North facing 5 BHK triplex house plan designed for 30x50 plots in Chennai. 3150 sq.ft, 2 cars parking, 100% Vastu approved with room dimensions and turnkey costs.",
+      keywords: "28x41 house plan, 5bhk house plan 30x50 plot, north facing 5bhk house plan, 30x50 house design chennai, triplex villa plan"
+    },
+    isFeatured: true,
+    isActive: true,
+    createdAt: "2026-09-01"
   }
 ];

@@ -1,17 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Service } from '../types';
 import { ChevronRight, ShieldCheck, HelpCircle, ChevronDown, Image as ImageIcon, ZoomIn, PhoneCall, Sparkles, Sliders, ArrowLeft } from 'lucide-react';
 import { Breadcrumbs } from './Breadcrumbs';
 import { InteractiveLightbox } from './InteractiveLightbox';
 import { motion, AnimatePresence } from 'motion/react';
+import { findService } from '../lib/routing';
 
 interface ServicesProps {
   services: Service[];
   setActiveTab: (tab: string) => void;
+  selectedServiceId?: string | null;
+  onSelectService?: (id: string | null) => void;
 }
 
-export const Services: React.FC<ServicesProps> = ({ services, setActiveTab }) => {
-  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+export const Services: React.FC<ServicesProps> = ({
+  services,
+  setActiveTab,
+  selectedServiceId: selectedServiceIdProp = null,
+  onSelectService
+}) => {
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(selectedServiceIdProp);
   const [activeFaqIdx, setActiveFaqIdx] = useState<number | null>(null);
 
   // Lightbox State
@@ -20,20 +28,53 @@ export const Services: React.FC<ServicesProps> = ({ services, setActiveTab }) =>
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [lightboxTitle, setLightboxTitle] = useState('');
 
-  // Monitor custom navigation events from the global search
+  // Synchronize external prop
+  useEffect(() => {
+    if (selectedServiceIdProp !== undefined && selectedServiceIdProp !== selectedServiceId) {
+      setSelectedServiceId(selectedServiceIdProp);
+    }
+  }, [selectedServiceIdProp]);
+
+  // Handle service selection with URL management
+  const handleSelectService = (idOrTitle: string | null) => {
+    if (!idOrTitle) {
+      setSelectedServiceId(null);
+      if (onSelectService) {
+        onSelectService(null);
+      } else {
+        window.history.pushState({}, '', '/services');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    const matched = findService(services, idOrTitle);
+    const chosenId = matched ? matched.id : idOrTitle;
+    setSelectedServiceId(chosenId);
+    if (onSelectService) {
+      onSelectService(chosenId);
+    } else {
+      window.history.pushState({}, '', `/services/${encodeURIComponent(chosenId)}`);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Monitor custom navigation events from global search
   useEffect(() => {
     const handleNavService = (e: Event) => {
       const id = (e as CustomEvent).detail;
       if (id) {
-        setSelectedServiceId(id);
-        window.scrollTo({ top: 300, behavior: 'smooth' });
+        handleSelectService(id);
       }
     };
     window.addEventListener('nav-service', handleNavService);
     return () => window.removeEventListener('nav-service', handleNavService);
-  }, []);
+  }, [services]);
 
-  const selectedService = services.find(s => s.id === selectedServiceId);
+  const selectedService = useMemo(() => {
+    const target = selectedServiceIdProp || selectedServiceId;
+    return findService(services, target);
+  }, [services, selectedServiceIdProp, selectedServiceId]);
 
   const toggleFaq = (idx: number) => {
     setActiveFaqIdx(prev => (prev === idx ? null : idx));
@@ -68,11 +109,11 @@ export const Services: React.FC<ServicesProps> = ({ services, setActiveTab }) =>
         {/* Breadcrumb Navigation */}
         <Breadcrumbs
           items={[
-            { label: 'Services', onClick: () => setSelectedServiceId(null) },
+            { label: 'Services', onClick: () => handleSelectService(null) },
             { label: selectedService.title, active: true }
           ]}
           onHomeClick={() => {
-            setSelectedServiceId(null);
+            handleSelectService(null);
             setActiveTab('home');
           }}
         />
@@ -260,7 +301,7 @@ export const Services: React.FC<ServicesProps> = ({ services, setActiveTab }) =>
 
           <div className="mt-10 text-center">
             <button
-              onClick={() => setSelectedServiceId(null)}
+              onClick={() => handleSelectService(null)}
               className="inline-flex items-center gap-2 text-blue-700 font-display font-bold text-sm hover:text-blue-900 transition-colors cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -303,7 +344,7 @@ export const Services: React.FC<ServicesProps> = ({ services, setActiveTab }) =>
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.4, delay: idx * 0.08 }}
-              onClick={() => setSelectedServiceId(svc.id)}
+              onClick={() => handleSelectService(svc.id)}
               className="bg-white rounded-3xl border border-grey-200 p-7 sm:p-8 flex flex-col justify-between shadow-soft hover:shadow-card lift-hover transition-all duration-300 cursor-pointer group text-left relative overflow-hidden"
             >
               <div className="flex flex-col gap-4">

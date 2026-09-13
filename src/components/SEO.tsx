@@ -17,7 +17,7 @@ export const SEO: React.FC<SEOProps> = ({
 }) => {
   useEffect(() => {
     // Dynamic document title update
-    document.title = `${title} | Lifehut Developers`;
+    document.title = title.includes('Lifehut') ? title : `${title} | Lifehut Developers`;
 
     // Dynamic description update
     let metaDesc = document.querySelector('meta[name="description"]');

@@ -1444,22 +1444,22 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
                 </div>
               </div>
 
-              {/* Dedicated CAD & PDF Drawings ZIP Package & Razorpay Configuration */}
-              <div className="bg-slate-50 p-5 rounded-2xl border-2 border-dashed border-blue-200 space-y-4">
+              {/* Dedicated CAD & PDF Drawings ZIP Package & PhonePe Configuration */}
+              <div className="bg-slate-50 p-5 rounded-2xl border-2 border-dashed border-purple-200 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200">
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-[#1A6DB5] text-white flex items-center justify-center shadow-sm">
+                    <div className="w-8 h-8 rounded-xl bg-purple-700 text-white flex items-center justify-center shadow-sm">
                       <Archive className="w-4 h-4" />
                     </div>
                     <div>
                       <h4 className="font-bold text-sm text-[#1A2332] flex items-center gap-2">
                         Full CAD &amp; PDF Drawings ZIP Package
-                        <span className="text-[10px] font-mono px-2 py-0.5 bg-blue-100 text-[#1A6DB5] rounded-full font-semibold">
-                          Razorpay Download
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-purple-100 text-purple-800 rounded-full font-semibold">
+                          PhonePe Download
                         </span>
                       </h4>
                       <p className="text-[11px] text-slate-500">
-                        Upload the production AutoCAD DWG, structural schedules &amp; PDF bundle delivered to clients after Razorpay checkout.
+                        Upload the production AutoCAD DWG, structural schedules &amp; PDF bundle delivered to clients after PhonePe checkout.
                       </p>
                     </div>
                   </div>

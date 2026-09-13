@@ -11,6 +11,7 @@ import { QuoteForm } from './components/QuoteForm';
 import { Contact } from './components/Contact';
 import { HousePlans } from './components/HousePlans';
 import { AdminPanel } from './components/AdminPanel';
+import { LegalPage, LegalTabType } from './components/LegalPage';
 import { FloatingQuickActions } from './components/FloatingQuickActions';
 import { Service, Project, Blog, Enquiry, Settings, HousePlan } from './types';
 import { defaultServices, defaultProjects, defaultBlogs, defaultSettings } from './data/defaults';
@@ -26,10 +27,12 @@ import {
 } from './lib/supabase';
 import { ShieldCheck, HardHat, Award, Check, ChevronRight, Sliders, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { parseCurrentRoute, findPlan, findProject, findService, findBlog } from './lib/routing';
 
 export default function App() {
   // Navigation State
   const [activeTab, setActiveTab] = useState<string>('home');
+  const [activePolicy, setActivePolicy] = useState<LegalTabType>('refund-policy');
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
     return localStorage.getItem('lifehut_admin_auth') === 'true';
   });
@@ -40,6 +43,9 @@ export default function App() {
   const [blogs, setBlogs] = useState<Blog[]>([]);
   const [housePlans, setHousePlans] = useState<HousePlan[]>([]);
   const [selectedPlanSlug, setSelectedPlanSlug] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  const [selectedBlogSlug, setSelectedBlogSlug] = useState<string | null>(null);
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,11 +73,37 @@ export default function App() {
         }
 
         setServices(sbServices && sbServices.length > 0 ? sbServices : defaultServices);
-        setProjects(sbProjects && sbProjects.length > 0 ? sbProjects : defaultProjects);
+        const resolvedProjects = (sbProjects && sbProjects.length > 0) ? sbProjects : (() => {
+          try {
+            const local = localStorage.getItem('lifehut_local_projects');
+            if (local) {
+              const parsed = JSON.parse(local);
+              if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            }
+          } catch {}
+          return defaultProjects;
+        })();
+        setProjects(resolvedProjects);
         setBlogs(blogData && blogData.length > 0 ? blogData : defaultBlogs);
         setHousePlans(sbHousePlans && sbHousePlans.length > 0 ? sbHousePlans : defaultHousePlans);
         setEnquiries(sbEnquiries || []);
-        setSettings(sbSettings || defaultSettings);
+        if (sbSettings && (sbSettings.heroTitle || sbSettings.address || sbSettings.stats)) {
+          const merged = {
+            ...defaultSettings,
+            ...sbSettings,
+            stats: {
+              ...defaultSettings.stats,
+              ...(sbSettings.stats || {})
+            }
+          };
+          setSettings(merged);
+          try {
+            localStorage.setItem('lifehut_local_settings', JSON.stringify(merged));
+          } catch {}
+        } else {
+          const local = localStorage.getItem('lifehut_local_settings');
+          setSettings(local ? JSON.parse(local) : defaultSettings);
+        }
         setLoading(false);
 
         // Run silent code-driven migration and synchronization in background without any UI disruption
@@ -132,7 +164,23 @@ export default function App() {
 
       if (settingsRes && settingsRes.ok) {
         const stData = await settingsRes.json();
-        setSettings(stData || defaultSettings);
+        if (stData && (stData.heroTitle || stData.address || stData.stats)) {
+          const merged = {
+            ...defaultSettings,
+            ...stData,
+            stats: {
+              ...defaultSettings.stats,
+              ...(stData.stats || {})
+            }
+          };
+          setSettings(merged);
+          try {
+            localStorage.setItem('lifehut_local_settings', JSON.stringify(merged));
+          } catch {}
+        } else {
+          const local = localStorage.getItem('lifehut_local_settings');
+          setSettings(local ? JSON.parse(local) : defaultSettings);
+        }
       } else {
         const local = localStorage.getItem('lifehut_local_settings');
         setSettings(local ? JSON.parse(local) : defaultSettings);
@@ -165,19 +213,39 @@ export default function App() {
 
   useEffect(() => {
     const handleUrlRoute = () => {
-      const pathname = window.location.pathname;
-      const hash = window.location.hash;
+      const route = parseCurrentRoute();
 
-      if (hash === '#admin') {
+      if (route.type === 'admin') {
         setActiveTab('admin');
-      } else if (pathname === '/house-plans' || pathname.startsWith('/house-plans/')) {
+      } else if (route.type === 'privacy-policy') {
+        setActiveTab('privacy-policy');
+        setActivePolicy('privacy-policy');
+      } else if (route.type === 'terms-and-conditions') {
+        setActiveTab('terms-and-conditions');
+        setActivePolicy('terms-and-conditions');
+      } else if (route.type === 'refund-policy') {
+        setActiveTab('refund-policy');
+        setActivePolicy('refund-policy');
+      } else if (route.type === 'legal') {
+        const policy = route.policy || 'refund-policy';
+        setActiveTab(policy);
+        setActivePolicy(policy as LegalTabType);
+      } else if (route.type === 'house-plans') {
         setActiveTab('house-plans');
-        const parts = pathname.split('/').filter(Boolean);
-        if (parts.length > 1 && parts[1]) {
-          setSelectedPlanSlug(parts[1]);
-        } else {
-          setSelectedPlanSlug(null);
-        }
+        setSelectedPlanSlug(route.slug || null);
+      } else if (route.type === 'projects') {
+        setActiveTab('projects');
+        setSelectedProjectId(route.id || null);
+      } else if (route.type === 'services') {
+        setActiveTab('services');
+        setSelectedServiceId(route.id || null);
+      } else if (route.type === 'blogs') {
+        setActiveTab('blogs');
+        setSelectedBlogSlug(route.slug || null);
+      } else if (['pricing', 'quote', 'contact'].includes(route.type)) {
+        setActiveTab(route.type);
+      } else {
+        setActiveTab('home');
       }
     };
 
@@ -189,7 +257,7 @@ export default function App() {
       setActiveTab('house-plans');
       if (e.detail) {
         setSelectedPlanSlug(e.detail);
-        window.history.pushState({}, '', `/house-plans/${e.detail}`);
+        window.history.pushState({}, '', `/house-plans/${encodeURIComponent(e.detail)}`);
       } else {
         setSelectedPlanSlug(null);
         window.history.pushState({}, '', '/house-plans');
@@ -197,14 +265,137 @@ export default function App() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
+    const handleCustomNavProject = (e: any) => {
+      setActiveTab('projects');
+      if (e.detail) {
+        setSelectedProjectId(e.detail);
+        window.history.pushState({}, '', `/projects/${encodeURIComponent(e.detail)}`);
+      } else {
+        setSelectedProjectId(null);
+        window.history.pushState({}, '', '/projects');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleCustomNavService = (e: any) => {
+      setActiveTab('services');
+      if (e.detail) {
+        setSelectedServiceId(e.detail);
+        window.history.pushState({}, '', `/services/${encodeURIComponent(e.detail)}`);
+      } else {
+        setSelectedServiceId(null);
+        window.history.pushState({}, '', '/services');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleCustomNavBlog = (e: any) => {
+      setActiveTab('blogs');
+      if (e.detail) {
+        setSelectedBlogSlug(e.detail);
+        window.history.pushState({}, '', `/blogs/${encodeURIComponent(e.detail)}`);
+      } else {
+        setSelectedBlogSlug(null);
+        window.history.pushState({}, '', '/blogs');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
     window.addEventListener('nav-house-plan', handleCustomNavPlan);
+    window.addEventListener('nav-project', handleCustomNavProject);
+    window.addEventListener('nav-service', handleCustomNavService);
+    window.addEventListener('nav-blog', handleCustomNavBlog);
 
     return () => {
       window.removeEventListener('popstate', handleUrlRoute);
       window.removeEventListener('hashchange', handleUrlRoute);
       window.removeEventListener('nav-house-plan', handleCustomNavPlan);
+      window.removeEventListener('nav-project', handleCustomNavProject);
+      window.removeEventListener('nav-service', handleCustomNavService);
+      window.removeEventListener('nav-blog', handleCustomNavBlog);
     };
   }, []);
+
+  const handleSetActiveTab = (tab: string) => {
+    setActiveTab(tab);
+    if (tab === 'home') {
+      window.history.pushState({}, '', '/');
+    } else if (tab === 'house-plans') {
+      setSelectedPlanSlug(null);
+      window.history.pushState({}, '', '/house-plans');
+    } else if (tab === 'projects') {
+      setSelectedProjectId(null);
+      window.history.pushState({}, '', '/projects');
+    } else if (tab === 'services') {
+      setSelectedServiceId(null);
+      window.history.pushState({}, '', '/services');
+    } else if (tab === 'pricing') {
+      window.history.pushState({}, '', '/pricing');
+    } else if (tab === 'blogs') {
+      setSelectedBlogSlug(null);
+      window.history.pushState({}, '', '/blogs');
+    } else if (tab === 'quote') {
+      window.history.pushState({}, '', '/quote');
+    } else if (tab === 'contact') {
+      window.history.pushState({}, '', '/contact');
+    } else if (tab === 'privacy-policy') {
+      setActivePolicy('privacy-policy');
+      window.history.pushState({}, '', '/privacy-policy');
+    } else if (tab === 'terms-and-conditions') {
+      setActivePolicy('terms-and-conditions');
+      window.history.pushState({}, '', '/terms-and-conditions');
+    } else if (tab === 'refund-policy') {
+      setActivePolicy('refund-policy');
+      window.history.pushState({}, '', '/refund-policy');
+    } else if (tab === 'admin') {
+      window.location.hash = '#admin';
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSelectPlan = (slug: string | null) => {
+    setSelectedPlanSlug(slug);
+    if (slug) {
+      const plan = findPlan(housePlans, slug);
+      const chosenSlug = plan ? plan.slug : slug;
+      window.history.pushState({}, '', `/house-plans/${encodeURIComponent(chosenSlug)}`);
+    } else {
+      window.history.pushState({}, '', '/house-plans');
+    }
+  };
+
+  const handleSelectProject = (id: string | null) => {
+    setSelectedProjectId(id);
+    if (id) {
+      const proj = findProject(projects, id);
+      const chosenId = proj ? proj.id : id;
+      window.history.pushState({}, '', `/projects/${encodeURIComponent(chosenId)}`);
+    } else {
+      window.history.pushState({}, '', '/projects');
+    }
+  };
+
+  const handleSelectService = (id: string | null) => {
+    setSelectedServiceId(id);
+    if (id) {
+      const svc = findService(services, id);
+      const chosenId = svc ? svc.id : id;
+      window.history.pushState({}, '', `/services/${encodeURIComponent(chosenId)}`);
+    } else {
+      window.history.pushState({}, '', '/services');
+    }
+  };
+
+  const handleSelectBlog = (slugOrId: string | null) => {
+    setSelectedBlogSlug(slugOrId);
+    if (slugOrId) {
+      const b = findBlog(blogs, slugOrId);
+      const chosen = b ? (b.slug || b.id) : slugOrId;
+      window.history.pushState({}, '', `/blogs/${encodeURIComponent(chosen)}`);
+    } else {
+      window.history.pushState({}, '', '/blogs');
+    }
+  };
 
   const handleAdminLogin = () => {
     setIsAdminLoggedIn(true);
@@ -218,24 +409,24 @@ export default function App() {
     setActiveTab('home');
   };
 
-  const heroTitle = settings?.heroTitle || "We Build Your Dream Home";
-  const heroSubtitle = settings?.heroSubtitle || "Luxury Villa Construction & Turnkey Residential Execution with Rigorous Engineering Integrity.";
-  const address = settings?.address || "Lifehut Developers, Ground Floor, No. 4, Thirualluvar Nagar 1st Street, Keelkattalai, Chennai, Tamil Nadu 600117";
-  const phone = settings?.phone || "+91 80721 63330";
-  const email = settings?.email || "lifehutdevelopers@gmail.com";
-  const instagramUrl = settings?.instagramUrl || "https://www.instagram.com/lifehut_developers/";
-  const pinterestUrl = settings?.pinterestUrl || "https://in.pinterest.com/lifehutdevelopers/";
-  const youtubeUrl = settings?.youtubeUrl || "https://www.youtube.com/@lifehutdevelopers";
-  const facebookUrl = settings?.facebookUrl || "https://facebook.com/lifehutdevelopers";
+  const heroTitle = settings?.heroTitle || defaultSettings.heroTitle;
+  const heroSubtitle = settings?.heroSubtitle || defaultSettings.heroSubtitle;
+  const address = settings?.address || defaultSettings.address;
+  const phone = settings?.phone || defaultSettings.phone;
+  const email = settings?.email || defaultSettings.email;
+  const instagramUrl = settings?.instagramUrl || defaultSettings.instagramUrl;
+  const pinterestUrl = settings?.pinterestUrl || defaultSettings.pinterestUrl;
+  const youtubeUrl = settings?.youtubeUrl || defaultSettings.youtubeUrl;
+  const facebookUrl = settings?.facebookUrl || defaultSettings.facebookUrl;
 
   const stats = {
-    projectsDone: settings?.stats?.projectsDone || "120",
-    experienceYears: settings?.stats?.experienceYears || "7",
-    clientSatisfaction: settings?.stats?.clientSatisfaction || "99",
-    hiddenCharges: settings?.stats?.hiddenCharges || "0"
+    projectsDone: settings?.stats?.projectsDone || defaultSettings.stats?.projectsDone || "120+",
+    experienceYears: settings?.stats?.experienceYears || defaultSettings.stats?.experienceYears || "7+",
+    clientSatisfaction: settings?.stats?.clientSatisfaction || defaultSettings.stats?.clientSatisfaction || "99%",
+    hiddenCharges: settings?.stats?.hiddenCharges || defaultSettings.stats?.hiddenCharges || "₹0"
   };
 
-  const heroImage = "/src/assets/images/hero_villa_1784191464588.jpg";
+  const heroImage = settings?.heroBannerImage || defaultSettings.heroBannerImage || "/src/assets/images/hero_villa_1784191464588.jpg";
 
   if (loading) {
     return (
@@ -317,6 +508,32 @@ export default function App() {
           title="Contact Headquarters | Schedule Blueprint Consultation"
           description="Reach our Keelkattalai headquarters. Schedule an on-site structural engineering review, or speak directly to our Principal civil engineer."
           keywords="builder contact Chennai, Keelkattalai office"
+        />
+      )}
+      {['privacy-policy', 'terms-and-conditions', 'refund-policy', 'legal'].includes(activeTab) && (
+        <SEO
+          title={
+            (activeTab === 'privacy-policy' || (activeTab === 'legal' && activePolicy === 'privacy-policy'))
+              ? "Privacy Policy | Lifehut Developers"
+              : (activeTab === 'terms-and-conditions' || (activeTab === 'legal' && activePolicy === 'terms-and-conditions'))
+              ? "Terms and Conditions | Lifehut Developers"
+              : "Cancellation and Refund Policy | Lifehut Developers"
+          }
+          description={
+            (activeTab === 'privacy-policy' || (activeTab === 'legal' && activePolicy === 'privacy-policy'))
+              ? "Official Privacy Policy for Lifehut Developers. Learn how we securely protect customer data and PhonePe payments under RBI regulations."
+              : (activeTab === 'terms-and-conditions' || (activeTab === 'legal' && activePolicy === 'terms-and-conditions'))
+              ? "Terms and Conditions for Lifehut Developers turnkey residential construction services, CAD blueprint downloads, and PhonePe payment terms."
+              : "Cancellation and Refund Policy for Lifehut Developers architectural CAD floor plans and turnkey construction services in Chennai."
+          }
+          keywords="privacy policy, terms and conditions, refund policy, cancellation policy, Lifehut Developers, PhonePe payments Chennai"
+          canonicalPath={
+            (activeTab === 'privacy-policy' || (activeTab === 'legal' && activePolicy === 'privacy-policy'))
+              ? "/privacy-policy"
+              : (activeTab === 'terms-and-conditions' || (activeTab === 'legal' && activePolicy === 'terms-and-conditions'))
+              ? "/terms-and-conditions"
+              : "/refund-policy"
+          }
         />
       )}
 
@@ -461,6 +678,32 @@ export default function App() {
                 address={address}
                 phone={phone}
                 email={email}
+              />
+            </motion.div>
+          )}
+
+          {['privacy-policy', 'terms-and-conditions', 'refund-policy', 'legal'].includes(activeTab) && (
+            <motion.div
+              key="legal-policies"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3 }}
+            >
+              <LegalPage
+                activePolicy={
+                  (['privacy-policy', 'terms-and-conditions', 'refund-policy'].includes(activeTab)
+                    ? (activeTab as LegalTabType)
+                    : activePolicy)
+                }
+                setActivePolicy={(p) => {
+                  setActivePolicy(p);
+                  setActiveTab(p);
+                }}
+                setActiveTab={setActiveTab}
+                phone={phone}
+                email={email}
+                address={address}
               />
             </motion.div>
           )}

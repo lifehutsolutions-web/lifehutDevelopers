@@ -48,13 +48,22 @@ export const Footer: React.FC<FooterProps> = ({
   };
 
   const handleNav = (target: string) => {
-    if (['about', 'process', 'faq', 'contact', 'services-preview', 'projects-preview'].includes(target)) {
+    if (['privacy-policy', 'terms-and-conditions', 'refund-policy'].includes(target)) {
+      setActiveTab(target);
+      window.history.pushState({}, '', `/${target}`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (['about', 'process', 'faq', 'contact', 'services-preview', 'projects-preview'].includes(target)) {
       setActiveTab('home');
       setTimeout(() => {
         scrollToAnchor(target);
       }, 50);
     } else {
       setActiveTab(target);
+      if (target === 'home') {
+        window.history.pushState({}, '', '/');
+      } else if (['house-plans', 'services', 'projects', 'pricing', 'blogs', 'quote', 'contact'].includes(target)) {
+        window.history.pushState({}, '', `/${target}`);
+      }
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
@@ -185,6 +194,16 @@ export const Footer: React.FC<FooterProps> = ({
                   FAQ
                 </button>
               </li>
+              <li className="pt-1.5 border-t border-slate-100">
+                <a
+                  href="/refund-policy"
+                  onClick={(e) => { e.preventDefault(); handleNav('refund-policy'); }}
+                  className="hover:text-blue-700 transition-colors cursor-pointer flex items-center justify-between text-xs text-slate-500"
+                >
+                  <span>Refund &amp; Cancellation</span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-mono">Policy</span>
+                </a>
+              </li>
             </ul>
           </div>
 
@@ -232,20 +251,36 @@ export const Footer: React.FC<FooterProps> = ({
         </div>
 
         {/* Bottom Bar */}
-        <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-grey-500">
-          <p>© {new Date().getFullYear()} Lifehut Developers. All rights reserved. Registered Civil Construction Firm.</p>
-          <div className="flex items-center gap-6">
-            <button onClick={() => handleNav('contact')} className="hover:text-blue-700 transition-colors">
+        <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-grey-500">
+          <p>© {new Date().getFullYear()} Lifehut Developers. All rights reserved. Registered Civil Construction Firm, Chennai.</p>
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs">
+            <a
+              href="/privacy-policy"
+              onClick={(e) => { e.preventDefault(); handleNav('privacy-policy'); }}
+              className="text-slate-600 hover:text-blue-700 transition-colors font-medium cursor-pointer"
+            >
               Privacy Policy
-            </button>
-            <span>•</span>
-            <button onClick={() => handleNav('contact')} className="hover:text-blue-700 transition-colors">
-              Terms of Service
-            </button>
-            <span>•</span>
+            </a>
+            <span className="text-slate-300">•</span>
+            <a
+              href="/terms-and-conditions"
+              onClick={(e) => { e.preventDefault(); handleNav('terms-and-conditions'); }}
+              className="text-slate-600 hover:text-blue-700 transition-colors font-medium cursor-pointer"
+            >
+              Terms &amp; Conditions
+            </a>
+            <span className="text-slate-300">•</span>
+            <a
+              href="/refund-policy"
+              onClick={(e) => { e.preventDefault(); handleNav('refund-policy'); }}
+              className="text-slate-600 hover:text-blue-700 transition-colors font-medium cursor-pointer"
+            >
+              Cancellation &amp; Refund Policy
+            </a>
+            <span className="text-slate-300">•</span>
             <button 
               onClick={scrollToTop}
-              className="inline-flex items-center gap-1 text-blue-700 font-semibold hover:underline"
+              className="inline-flex items-center gap-1 text-blue-700 font-semibold hover:underline cursor-pointer"
             >
               <span>Back to Top</span>
               <ArrowUp className="w-3.5 h-3.5" />

@@ -108,8 +108,13 @@ export const Navbar: React.FC<NavbarProps> = ({
       return;
     }
 
-    // Direct tab navigation to actual pages: 'home', 'services', 'projects', 'pricing', 'blogs', 'quote', 'admin'
+    // Direct tab navigation to actual pages: 'home', 'services', 'projects', 'pricing', 'blogs', 'quote', 'admin', 'house-plans'
     setActiveTab(sectionOrTab);
+    if (sectionOrTab === 'home') {
+      window.history.pushState({}, '', '/');
+    } else if (['house-plans', 'services', 'projects', 'pricing', 'blogs', 'quote'].includes(sectionOrTab)) {
+      window.history.pushState({}, '', `/${sectionOrTab}`);
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -120,12 +125,16 @@ export const Navbar: React.FC<NavbarProps> = ({
     setActiveTab(type);
 
     if (type === 'blogs') {
+      window.history.pushState({}, '', `/blogs/${encodeURIComponent(id)}`);
       window.dispatchEvent(new CustomEvent('nav-blog', { detail: id }));
     } else if (type === 'services') {
+      window.history.pushState({}, '', `/services/${encodeURIComponent(id)}`);
       window.dispatchEvent(new CustomEvent('nav-service', { detail: id }));
     } else if (type === 'projects') {
+      window.history.pushState({}, '', `/projects/${encodeURIComponent(id)}`);
       window.dispatchEvent(new CustomEvent('nav-project', { detail: id }));
     } else if (type === 'house-plans') {
+      window.history.pushState({}, '', `/house-plans/${encodeURIComponent(id)}`);
       window.dispatchEvent(new CustomEvent('nav-house-plan', { detail: id }));
     }
   };
@@ -180,7 +189,11 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-6 lg:px-8 flex items-center justify-between h-20">
         {/* Brand Logo */}
         <button
-          onClick={() => { setActiveTab('home'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          onClick={() => { 
+            setActiveTab('home'); 
+            window.history.pushState({}, '', '/');
+            window.scrollTo({ top: 0, behavior: 'smooth' }); 
+          }}
           className="flex items-center gap-3 focus:outline-none cursor-pointer group"
           aria-label="Lifehut Developers Home"
         >

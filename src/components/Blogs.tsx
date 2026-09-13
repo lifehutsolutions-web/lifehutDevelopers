@@ -1,19 +1,58 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Blog } from '../types';
 import { Search, Calendar, Clock, ArrowLeft, Send, CheckCircle, MessageSquare, BookOpen } from 'lucide-react';
 import { Breadcrumbs } from './Breadcrumbs';
 import { motion } from 'motion/react';
+import { findBlog } from '../lib/routing';
 
 interface BlogsProps {
   blogs: Blog[];
   setActiveTab: (tab: string) => void;
+  selectedBlogSlug?: string | null;
+  onSelectBlog?: (slugOrId: string | null) => void;
 }
 
-export const Blogs: React.FC<BlogsProps> = ({ blogs, setActiveTab }) => {
-  const [selectedBlogId, setSelectedBlogId] = useState<string | null>(null);
+export const Blogs: React.FC<BlogsProps> = ({
+  blogs,
+  setActiveTab,
+  selectedBlogSlug: selectedBlogSlugProp = null,
+  onSelectBlog
+}) => {
+  const [selectedBlogSlug, setSelectedBlogSlug] = useState<string | null>(selectedBlogSlugProp);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [scrollPercent, setScrollPercent] = useState(0);
+
+  // Synchronize external prop
+  useEffect(() => {
+    if (selectedBlogSlugProp !== undefined && selectedBlogSlugProp !== selectedBlogSlug) {
+      setSelectedBlogSlug(selectedBlogSlugProp);
+    }
+  }, [selectedBlogSlugProp]);
+
+  // Handle blog selection with URL management
+  const handleSelectBlog = (slugOrId: string | null) => {
+    if (!slugOrId) {
+      setSelectedBlogSlug(null);
+      if (onSelectBlog) {
+        onSelectBlog(null);
+      } else {
+        window.history.pushState({}, '', '/blogs');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    const matched = findBlog(blogs, slugOrId);
+    const chosenSlug = matched ? (matched.slug || matched.id) : slugOrId;
+    setSelectedBlogSlug(chosenSlug);
+    if (onSelectBlog) {
+      onSelectBlog(chosenSlug);
+    } else {
+      window.history.pushState({}, '', `/blogs/${encodeURIComponent(chosenSlug)}`);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const [comments, setComments] = useState<Record<string, { author: string; text: string; date: string }[]>>({
     "1": [
@@ -33,17 +72,21 @@ export const Blogs: React.FC<BlogsProps> = ({ blogs, setActiveTab }) => {
     const handleNavBlog = (e: Event) => {
       const id = (e as CustomEvent).detail;
       if (id) {
-        setSelectedBlogId(id);
-        window.scrollTo({ top: 300, behavior: 'smooth' });
+        handleSelectBlog(id);
       }
     };
     window.addEventListener('nav-blog', handleNavBlog);
     return () => window.removeEventListener('nav-blog', handleNavBlog);
-  }, []);
+  }, [blogs]);
+
+  const selectedBlog = useMemo(() => {
+    const target = selectedBlogSlugProp || selectedBlogSlug;
+    return findBlog(blogs, target);
+  }, [blogs, selectedBlogSlugProp, selectedBlogSlug]);
 
   useEffect(() => {
     const handleScroll = () => {
-      if (!selectedBlogId) return;
+      if (!selectedBlog) return;
       const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
       if (totalHeight > 0) {
         const percent = (window.scrollY / totalHeight) * 100;
@@ -52,9 +95,7 @@ export const Blogs: React.FC<BlogsProps> = ({ blogs, setActiveTab }) => {
     };
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [selectedBlogId]);
-
-  const selectedBlog = blogs.find(b => b.id === selectedBlogId);
+  }, [selectedBlog]);
 
   const categories = ['All', 'Structural', 'Materials', 'Budgeting', 'Planning'];
   const filteredBlogs = blogs.filter(b => {
@@ -99,7 +140,7 @@ export const Blogs: React.FC<BlogsProps> = ({ blogs, setActiveTab }) => {
   };
 
   if (selectedBlog) {
-    const blogComments = comments[selectedBlogId || ''] || [];
+    const blogComments = comments[selectedBlog.id || ''] || [];
 
     const tocItems = [
       { id: "intro", label: "1. Overview & Core Principles" },
@@ -118,11 +159,11 @@ export const Blogs: React.FC<BlogsProps> = ({ blogs, setActiveTab }) => {
 
         <Breadcrumbs
           items={[
-            { label: 'Blogs', onClick: () => setSelectedBlogId(null) },
+            { label: 'Blogs', onClick: () => handleSelectBlog(null) },
             { label: selectedBlog.title, active: true }
           ]}
           onHomeClick={() => {
-            setSelectedBlogId(null);
+            handleSelectBlog(null);
             setActiveTab('home');
           }}
         />
@@ -130,7 +171,7 @@ export const Blogs: React.FC<BlogsProps> = ({ blogs, setActiveTab }) => {
         <div className="max-w-7xl mx-auto px-6 lg:px-8 mt-6 text-left">
           
           <button
-            onClick={() => setSelectedBlogId(null)}
+            onClick={() => handleSelectBlog(null)}
             className="inline-flex items-center gap-2 text-grey-600 hover:text-blue-700 text-xs font-display font-bold uppercase tracking-wider mb-6 transition-colors group cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" />
@@ -245,7 +286,7 @@ export const Blogs: React.FC<BlogsProps> = ({ blogs, setActiveTab }) => {
                     <input
                       type="text"
                       required
-                      value={commentName}
+                      value={commentName ?? ''}
                       onChange={(e) => setCommentName(e.target.value)}
                       placeholder="Your Name..."
                       className="bg-white border border-grey-200 rounded-xl px-4 py-2.5 text-xs sm:text-sm outline-none focus:border-blue-700 text-ink"
@@ -253,7 +294,7 @@ export const Blogs: React.FC<BlogsProps> = ({ blogs, setActiveTab }) => {
                     <textarea
                       required
                       rows={3}
-                      value={commentText}
+                      value={commentText ?? ''}
                       onChange={(e) => setCommentText(e.target.value)}
                       placeholder="Your question or comment..."
                       className="bg-white border border-grey-200 rounded-xl p-4 text-xs sm:text-sm outline-none focus:border-blue-700 text-ink"
@@ -362,7 +403,7 @@ export const Blogs: React.FC<BlogsProps> = ({ blogs, setActiveTab }) => {
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-grey-400" />
             <input
               type="text"
-              value={searchTerm}
+              value={searchTerm ?? ''}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search engineering guides..."
               className="w-full text-xs sm:text-sm bg-grey-50 border border-grey-200 rounded-xl pl-9 pr-4 py-2 outline-none focus:bg-white focus:border-blue-700 text-ink"
@@ -380,7 +421,7 @@ export const Blogs: React.FC<BlogsProps> = ({ blogs, setActiveTab }) => {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.35, delay: idx * 0.08 }}
-              onClick={() => setSelectedBlogId(b.id)}
+              onClick={() => handleSelectBlog(b.slug || b.id)}
               className="bg-white rounded-3xl border border-grey-200 overflow-hidden shadow-soft hover:shadow-card lift-hover transition-all duration-300 cursor-pointer text-left flex flex-col justify-between h-[370px]"
             >
               <div>

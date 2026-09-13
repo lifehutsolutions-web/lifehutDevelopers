@@ -323,22 +323,61 @@
     "clientSatisfaction": "99%",
     "hiddenCharges": "₹0"
   },
-  "enquiries": [],
+  "enquiries": [
+    {
+      "id": "free_claim_1789288296440",
+      "name": "Venkatesh",
+      "email": "",
+      "phone": "9876543210",
+      "service": "Free CAD Download: LH-HP-1500",
+      "message": "Claimed free CAD package for 1500 Sq.Ft Contemporary Single-Storey 3 BHK House Plan.",
+      "date": "2026-09-13T08:31:36.440Z",
+      "status": "New"
+    },
+    {
+      "id": "free_claim_1789288271867",
+      "name": "Venkatesh",
+      "email": "",
+      "phone": "9876543210",
+      "service": "Free CAD Download: plan-1",
+      "message": "Claimed free CAD package for plan-1.",
+      "date": "2026-09-13T08:31:11.867Z",
+      "status": "New"
+    },
+    {
+      "id": "cad_order_1789024056310",
+      "name": "Test User",
+      "email": "",
+      "phone": "9876543210",
+      "service": "CAD & PDF Drawings: plan-1",
+      "message": "Paid ₹999 via PhonePe (Transaction ID: PP_TEST_123). ",
+      "date": "2026-09-10T07:07:36.310Z",
+      "status": "New"
+    }
+  ],
   "quotes": [],
   "settings": {
-    "heroTitle": "We Build Your Dream",
-    "heroSubtitle": "Luxury Villa Construction with Engineering Precision.",
+    "heroTitle": "Premium Residential Contractors in Chennai",
+    "heroSubtitle": "Custom Luxury Villa Builders & Turnkey Residential House Contractors with Civil Engineering Precision.",
     "heroBannerImage": "/src/assets/images/hero_villa_1784191464588.jpg",
-    "address": "No.16, 1st Street, Nehru Nagar, Ambattur, Chennai – 600053",
+    "address": "Ground Floor, No. 4, Thirualluvar Nagar 1st Street, Keelkattalai, Chennai, Tamil Nadu 600117",
     "phone": "+91 80721 63330",
     "email": "lifehutdevelopers@gmail.com",
     "hours": "Mon – Sat: 9:00 AM – 6:00 PM",
     "whatsappNumber": "918072163330",
-    "instagramUrl": "https://www.instagram.com/lifehutdevelopers/",
-    "pinterestUrl": "https://in.pinterest.com/lifehutdevelopers",
-    "seoTitle": "Lifehut Developers | Luxury Residential Construction in Chennai",
-    "seoDescription": "Award-winning luxury residential builder in Chennai. Turnkey home construction, luxury villa execution, and premium engineering consultations since 2019.",
-    "seoKeywords": "luxury construction, villa builders chennai, turnkey residential construction, custom home building, Lifehut developers chennai"
+    "facebookUrl": "https://facebook.com/lifehutdevelopers",
+    "instagramUrl": "https://www.instagram.com/lifehut_developers/",
+    "pinterestUrl": "https://in.pinterest.com/lifehutdevelopers/",
+    "youtubeUrl": "https://www.youtube.com/@lifehutdevelopers",
+    "seoTitle": "Top Residential Building Construction Company in Chennai | Lifehut Developers",
+    "seoDescription": "Leading residential building construction company in Chennai.",
+    "seoKeywords": "residential building construction company, turnkey house builders chennai",
+    "stats": {
+      "projectsDone": "135+",
+      "experienceYears": "8+",
+      "clientSatisfaction": "99%",
+      "hiddenCharges": "₹0"
+    }
   },
   "housePlans": [
     {

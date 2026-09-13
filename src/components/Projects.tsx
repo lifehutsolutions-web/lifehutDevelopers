@@ -1,17 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Project } from '../types';
 import { Calendar, Ruler, Home, BedDouble, Layers, MapPin, DollarSign, Quote, ArrowLeft, Eye, ZoomIn, Sparkles, User, Tag } from 'lucide-react';
 import { Breadcrumbs } from './Breadcrumbs';
 import { InteractiveLightbox } from './InteractiveLightbox';
 import { motion, AnimatePresence } from 'motion/react';
+import { findProject } from '../lib/routing';
 
 interface ProjectsProps {
   projects: Project[];
   setActiveTab: (tab: string) => void;
+  selectedProjectId?: string | null;
+  onSelectProject?: (id: string | null) => void;
 }
 
-export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) => {
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+export const Projects: React.FC<ProjectsProps> = ({
+  projects,
+  setActiveTab,
+  selectedProjectId: selectedProjectIdProp = null,
+  onSelectProject
+}) => {
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(selectedProjectIdProp);
   const [activeCategory, setActiveCategory] = useState<string>('All');
   
   // Lightbox State
@@ -21,20 +29,53 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
   const [lightboxTitle, setLightboxTitle] = useState('');
   const [lightboxLocation, setLightboxLocation] = useState('');
 
+  // Synchronize external prop
+  useEffect(() => {
+    if (selectedProjectIdProp !== undefined && selectedProjectIdProp !== selectedProjectId) {
+      setSelectedProjectId(selectedProjectIdProp);
+    }
+  }, [selectedProjectIdProp]);
+
+  // Handle project selection with URL management
+  const handleSelectProject = (idOrName: string | null) => {
+    if (!idOrName) {
+      setSelectedProjectId(null);
+      if (onSelectProject) {
+        onSelectProject(null);
+      } else {
+        window.history.pushState({}, '', '/projects');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    const matched = findProject(projects, idOrName);
+    const chosenId = matched ? matched.id : idOrName;
+    setSelectedProjectId(chosenId);
+    if (onSelectProject) {
+      onSelectProject(chosenId);
+    } else {
+      window.history.pushState({}, '', `/projects/${encodeURIComponent(chosenId)}`);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Scroll handler for detail navigation
   useEffect(() => {
     const handleNavProject = (e: Event) => {
       const id = (e as CustomEvent).detail;
       if (id) {
-        setSelectedProjectId(id);
-        window.scrollTo({ top: 300, behavior: 'smooth' });
+        handleSelectProject(id);
       }
     };
     window.addEventListener('nav-project', handleNavProject);
     return () => window.removeEventListener('nav-project', handleNavProject);
-  }, []);
+  }, [projects]);
 
-  const selectedProject = projects.find(p => p.id === selectedProjectId);
+  const selectedProject = useMemo(() => {
+    const target = selectedProjectIdProp || selectedProjectId;
+    return findProject(projects, target);
+  }, [projects, selectedProjectIdProp, selectedProjectId]);
 
   const openLightbox = (imgs: string[], index = 0, title = '', loc = '') => {
     setLightboxImages(imgs);
@@ -114,11 +155,11 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
         {/* Breadcrumbs */}
         <Breadcrumbs
           items={[
-            { label: 'Projects', onClick: () => setSelectedProjectId(null) },
+            { label: 'Projects', onClick: () => handleSelectProject(null) },
             { label: selectedProject.name, active: true }
           ]}
           onHomeClick={() => {
-            setSelectedProjectId(null);
+            handleSelectProject(null);
             setActiveTab('home');
           }}
         />
@@ -131,7 +172,7 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
           className="max-w-7xl mx-auto px-6 lg:px-8 mt-6 text-left"
         >
           <button
-            onClick={() => setSelectedProjectId(null)}
+            onClick={() => handleSelectProject(null)}
             className="inline-flex items-center gap-2 text-grey-600 hover:text-blue-700 text-xs font-display font-bold uppercase tracking-wider mb-6 transition-colors group cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" />
@@ -467,7 +508,7 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setActiveTab }) =>
 
                       <div className="flex items-center gap-2.5 pt-3 border-t border-grey-200">
                         <button
-                          onClick={() => setSelectedProjectId(p.id)}
+                          onClick={() => handleSelectProject(p.id)}
                           className="flex-1 py-2 bg-blue-700 hover:bg-blue-900 text-white rounded-xl text-xs font-display font-bold transition-all flex items-center justify-center gap-1.5 shadow-soft cursor-pointer"
                         >
                           <Eye className="w-3.5 h-3.5" />
