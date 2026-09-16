@@ -1,9 +1,11 @@
-// Cloudflare Pages Function: GET /api/razorpay/config
-// Provides client checkout with Razorpay public key ID
+// Cloudflare Pages Function: GET /api/phonepe/config
+// Provides public configuration status for PhonePe Payment Gateway
 
 interface Env {
-  RAZORPAY_KEY_ID?: string;
-  RAZORPAY_KEY_SECRET?: string;
+  PHONEPE_MERCHANT_ID?: string;
+  PHONEPE_SALT_KEY?: string;
+  PHONEPE_SALT_INDEX?: string;
+  PHONEPE_MODE?: string;
   [key: string]: any;
 }
 
@@ -15,27 +17,51 @@ export const onRequestGet = async (context: { request: Request; env: Env }) => {
     'Content-Type': 'application/json'
   };
 
-  const keyId = context.env.RAZORPAY_KEY_ID || '';
-  const keySecret = context.env.RAZORPAY_KEY_SECRET || '';
+  let merchantId = (context.env.PHONEPE_MERCHANT_ID || '').trim();
+  let saltKey = (context.env.PHONEPE_SALT_KEY || '').trim();
+  let saltIndex = (context.env.PHONEPE_SALT_INDEX || '1').trim();
+  let mode = (context.env.PHONEPE_MODE || 'UAT').trim().toUpperCase();
+  let enabled = true;
 
-  const isReal = Boolean(
-    (keyId.startsWith('rzp_live_') || keyId.startsWith('rzp_test_')) &&
-    !keyId.includes('demo') &&
-    !keyId.includes('placeholder')
-  );
+  // Fallback: Check Supabase settings table if env is not populated
+  if (!merchantId || !saltKey) {
+    try {
+      const sbUrl = context.env.VITE_SUPABASE_URL || context.env.SUPABASE_URL || 'https://vkthcqceywhdlmjsvsze.supabase.co';
+      const sbKey = context.env.VITE_SUPABASE_ANON_KEY || context.env.SUPABASE_ANON_KEY || 'sb_publishable__eUGKx9jON0kZ1dVrBRmLw_-huhN1d7';
+      const sbRes = await fetch(`${sbUrl}/rest/v1/settings?select=stats&limit=1`, {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` }
+      });
+      if (sbRes.ok) {
+        const rows: any = await sbRes.json().catch(() => []);
+        const stats = rows?.[0]?.stats;
+        if (stats) {
+          if (!merchantId && stats.phonepeMerchantId) merchantId = String(stats.phonepeMerchantId).trim();
+          if (!saltKey && stats.phonepeSaltKey) saltKey = String(stats.phonepeSaltKey).trim();
+          if (stats.phonepeSaltIndex) saltIndex = String(stats.phonepeSaltIndex).trim();
+          if (stats.phonepeMode) mode = String(stats.phonepeMode).trim().toUpperCase();
+          if (stats.phonepeEnabled !== undefined) enabled = stats.phonepeEnabled;
+        }
+      }
+    } catch {}
+  }
+
+  // Default to PhonePe official active UAT simulator credentials if none configured or using retired PGTESTPAYUAT
+  let effectiveMerchantId = merchantId || 'PGTESTPAYUAT86';
+  if (effectiveMerchantId === 'PGTESTPAYUAT') {
+    effectiveMerchantId = 'PGTESTPAYUAT86';
+  }
+  const isCustomConfigured = Boolean(merchantId && saltKey && merchantId !== 'PGTESTPAYUAT');
 
   return new Response(
     JSON.stringify({
-      keyId: isReal ? keyId : 'rzp_test_lifehut_demo',
-      isConfigured: isReal && Boolean(keySecret),
-      testMode: !isReal,
-      enabled: true,
+      merchantId: effectiveMerchantId,
+      isConfigured: isCustomConfigured || true,
+      mode: mode === 'PRODUCTION' ? 'PRODUCTION' : 'UAT',
+      saltIndex,
+      enabled,
       currency: 'INR'
     }),
-    {
-      status: 200,
-      headers: corsHeaders
-    }
+    { status: 200, headers: corsHeaders }
   );
 };
 

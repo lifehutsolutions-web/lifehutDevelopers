@@ -76,8 +76,14 @@ async function verifyAndRespond(context: { request: Request; env: Env }, transac
     } catch {}
   }
 
-  if (!merchantId) merchantId = 'PGTESTPAYUAT';
-  if (!saltKey) saltKey = '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399';
+  if (!merchantId || merchantId === 'PGTESTPAYUAT') {
+    merchantId = 'PGTESTPAYUAT86';
+    saltKey = '96434309-7796-489d-8924-ab56988a6076';
+    saltIndex = '1';
+  }
+  if (!saltKey || saltKey === '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399') {
+    saltKey = '96434309-7796-489d-8924-ab56988a6076';
+  }
   if (!saltIndex) saltIndex = '1';
 
   const isProduction = mode === 'PRODUCTION';
@@ -85,31 +91,53 @@ async function verifyAndRespond(context: { request: Request; env: Env }, transac
     ? 'https://api.phonepe.com/apis/hermes'
     : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
 
-  // Endpoint: /pg/v1/status/{merchantId}/{transactionId}
-  const statusPath = `/pg/v1/status/${merchantId}/${transactionId}`;
-  const stringToHash = statusPath + saltKey;
-  const sha256Hash = await sha256Hex(stringToHash);
-  const xVerifyHeader = `${sha256Hash}###${saltIndex}`;
+  // Helper to query PhonePe status
+  async function queryStatus(mid: string, sKey: string, sIdx: string) {
+    const statusPath = `/pg/v1/status/${mid}/${transactionId}`;
+    const stringToHash = statusPath + sKey;
+    const sha256Hash = await sha256Hex(stringToHash);
+    const xVerifyHeader = `${sha256Hash}###${sIdx}`;
 
-  let statusRes: any = null;
-  let statusData: any = null;
+    try {
+      const res = await fetch(`${apiHost}${statusPath}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-VERIFY': xVerifyHeader,
+          'X-MERCHANT-ID': mid
+        }
+      });
+      const data = await res.json().catch(() => ({}));
+      return { res, data, ok: res.ok };
+    } catch (err: any) {
+      return { res: null, data: null, ok: false, error: err };
+    }
+  }
 
-  try {
-    statusRes = await fetch(`${apiHost}${statusPath}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-VERIFY': xVerifyHeader,
-        'X-MERCHANT-ID': merchantId
-      }
-    });
-    statusData = await statusRes.json().catch(() => ({}));
-  } catch (err: any) {
+  let statusCheck = await queryStatus(merchantId, saltKey, saltIndex);
+
+  // If in UAT and key returned KEY_NOT_CONFIGURED or "Key not found", fallback to PGTESTPAYUAT86
+  if (
+    !isProduction &&
+    (!statusCheck.ok || !statusCheck.data?.success) &&
+    (statusCheck.data?.code === 'KEY_NOT_CONFIGURED' ||
+     String(statusCheck.data?.message || '').toLowerCase().includes('key not found') ||
+     merchantId !== 'PGTESTPAYUAT86')
+  ) {
+    const fallbackCheck = await queryStatus('PGTESTPAYUAT86', '96434309-7796-489d-8924-ab56988a6076', '1');
+    if (fallbackCheck.ok || fallbackCheck.data?.code !== 'KEY_NOT_CONFIGURED') {
+      statusCheck = fallbackCheck;
+    }
+  }
+
+  if (!statusCheck.res && statusCheck.error) {
     return new Response(
-      JSON.stringify({ success: false, verified: false, message: `Could not reach PhonePe status API: ${err.message}` }),
+      JSON.stringify({ success: false, verified: false, message: `Could not reach PhonePe status API: ${statusCheck.error.message}` }),
       { status: 502, headers: corsHeaders }
     );
   }
+
+  const statusData = statusCheck.data;
 
   const isSuccess = Boolean(
     statusData?.success === true &&

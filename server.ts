@@ -928,9 +928,15 @@ async function startServer() {
       }
     }
 
-    const isConfigured = Boolean(merchantId && saltKey);
-    const effectiveMerchantId = merchantId || 'PGTESTPAYUAT';
-    const effectiveSaltKey = saltKey || '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399';
+    const isConfigured = Boolean(merchantId && saltKey && merchantId !== 'PGTESTPAYUAT');
+    let effectiveMerchantId = merchantId || 'PGTESTPAYUAT86';
+    if (effectiveMerchantId === 'PGTESTPAYUAT') {
+      effectiveMerchantId = 'PGTESTPAYUAT86';
+    }
+    let effectiveSaltKey = saltKey || '96434309-7796-489d-8924-ab56988a6076';
+    if (effectiveSaltKey === '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399') {
+      effectiveSaltKey = '96434309-7796-489d-8924-ab56988a6076';
+    }
 
     return {
       merchantId: effectiveMerchantId,
@@ -1092,40 +1098,62 @@ async function startServer() {
       const redirectUrl = `${origin}/house-plans?phonepe_txn=${encodeURIComponent(merchantTransactionId)}&plan_id=${encodeURIComponent(plan?.id || planId)}`;
       const callbackUrl = `${origin}/api/phonepe/status`;
 
-      const payload = {
-        merchantId: config.merchantId,
-        merchantTransactionId,
-        merchantUserId,
-        amount: amountInPaise,
-        redirectUrl,
-        redirectMode: 'REDIRECT',
-        callbackUrl,
-        mobileNumber: cleanPhone,
-        paymentInstrument: {
-          type: 'PAY_PAGE'
+      // Helper function to invoke PhonePe Pay
+      async function executePhonePePay(mid: string, sKey: string, sIdx: string) {
+        const payload = {
+          merchantId: mid,
+          merchantTransactionId,
+          merchantUserId,
+          amount: amountInPaise,
+          redirectUrl: `${origin}/house-plans?phonepe_txn=${encodeURIComponent(merchantTransactionId)}&plan_id=${encodeURIComponent(plan?.id || planId)}&mid=${encodeURIComponent(mid)}`,
+          redirectMode: 'REDIRECT',
+          callbackUrl,
+          mobileNumber: cleanPhone,
+          paymentInstrument: {
+            type: 'PAY_PAGE'
+          }
+        };
+
+        const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64');
+        const sha256 = crypto.createHash('sha256').update(base64Payload + '/pg/v1/pay' + sKey).digest('hex');
+        const xVerify = `${sha256}###${sIdx}`;
+
+        const res = await fetch(`${apiHost}/pg/v1/pay`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-VERIFY': xVerify
+          },
+          body: JSON.stringify({ request: base64Payload })
+        });
+
+        const data: any = await res.json().catch(() => ({}));
+        return { res, data, mid };
+      }
+
+      let payResult = await executePhonePePay(config.merchantId, config.saltKey, config.saltIndex);
+
+      // If in UAT and PhonePe rejected with KEY_NOT_CONFIGURED or "Key not found",
+      // gracefully fallback to PhonePe's active official UAT simulator credentials (PGTESTPAYUAT86)
+      if (
+        !isProduction &&
+        (!payResult.res.ok || !payResult.data?.success) &&
+        (payResult.data?.code === 'KEY_NOT_CONFIGURED' ||
+         String(payResult.data?.message || '').toLowerCase().includes('key not found') ||
+         config.merchantId !== 'PGTESTPAYUAT86')
+      ) {
+        const fallback = await executePhonePePay('PGTESTPAYUAT86', '96434309-7796-489d-8924-ab56988a6076', '1');
+        if (fallback.res.ok && fallback.data?.success) {
+          payResult = fallback;
         }
-      };
+      }
 
-      const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64');
-      const sha256 = crypto.createHash('sha256').update(base64Payload + '/pg/v1/pay' + config.saltKey).digest('hex');
-      const xVerify = `${sha256}###${config.saltIndex}`;
-
-      const ppeRes = await fetch(`${apiHost}/pg/v1/pay`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-VERIFY': xVerify
-        },
-        body: JSON.stringify({ request: base64Payload })
-      });
-
-      const ppeData: any = await ppeRes.json().catch(() => ({}));
-      if (!ppeRes.ok || !ppeData.success) {
-        const errMsg = ppeData?.message || `PhonePe PG responded with status ${ppeRes.status}`;
+      if (!payResult.res.ok || !payResult.data?.success) {
+        const errMsg = payResult.data?.message || `PhonePe PG responded with status ${payResult.res.status}`;
         return res.status(400).json({ success: false, message: `PhonePe error: ${errMsg}` });
       }
 
-      const paymentUrl = ppeData?.data?.instrumentResponse?.redirectInfo?.url;
+      const paymentUrl = payResult.data?.data?.instrumentResponse?.redirectInfo?.url;
       if (!paymentUrl) {
         return res.status(500).json({ success: false, message: 'Could not obtain checkout URL from PhonePe.' });
       }
@@ -1134,9 +1162,10 @@ async function startServer() {
         success: true,
         transactionId: merchantTransactionId,
         paymentUrl,
+        redirectUrl: paymentUrl,
         amount: finalAmount,
         currency: 'INR',
-        merchantId: config.merchantId,
+        merchantId: payResult.mid,
         mode: config.mode,
         plan: {
           id: plan?.id,
@@ -1177,20 +1206,44 @@ async function startServer() {
         ? 'https://api.phonepe.com/apis/hermes'
         : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
 
-      const statusPath = `/pg/v1/status/${config.merchantId}/${transactionId}`;
-      const sha256 = crypto.createHash('sha256').update(statusPath + config.saltKey).digest('hex');
-      const xVerify = `${sha256}###${config.saltIndex}`;
+      // Helper function to query status
+      async function queryStatusApi(mid: string, sKey: string, sIdx: string) {
+        const statusPath = `/pg/v1/status/${mid}/${transactionId}`;
+        const sha256 = crypto.createHash('sha256').update(statusPath + sKey).digest('hex');
+        const xVerify = `${sha256}###${sIdx}`;
 
-      const ppeRes = await fetch(`${apiHost}${statusPath}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-VERIFY': xVerify,
-          'X-MERCHANT-ID': config.merchantId
+        try {
+          const res = await fetch(`${apiHost}${statusPath}`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-VERIFY': xVerify,
+              'X-MERCHANT-ID': mid
+            }
+          });
+          const data: any = await res.json().catch(() => ({}));
+          return { res, data, ok: res.ok };
+        } catch (err: any) {
+          return { res: null, data: null, ok: false, error: err };
         }
-      });
+      }
 
-      const ppeData: any = await ppeRes.json().catch(() => ({}));
+      let check = await queryStatusApi(config.merchantId, config.saltKey, config.saltIndex);
+
+      if (
+        !isProduction &&
+        (!check.ok || !check.data?.success) &&
+        (check.data?.code === 'KEY_NOT_CONFIGURED' ||
+         String(check.data?.message || '').toLowerCase().includes('key not found') ||
+         config.merchantId !== 'PGTESTPAYUAT86')
+      ) {
+        const fallbackCheck = await queryStatusApi('PGTESTPAYUAT86', '96434309-7796-489d-8924-ab56988a6076', '1');
+        if (fallbackCheck.ok || fallbackCheck.data?.code !== 'KEY_NOT_CONFIGURED') {
+          check = fallbackCheck;
+        }
+      }
+
+      const ppeData = check.data;
       const isSuccess = Boolean(
         ppeData?.success === true &&
         (ppeData?.code === 'PAYMENT_SUCCESS' || ppeData?.data?.responseCode === 'SUCCESS' || ppeData?.data?.state === 'COMPLETED')

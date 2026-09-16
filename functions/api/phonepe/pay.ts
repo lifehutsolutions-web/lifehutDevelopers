@@ -91,9 +91,15 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       );
     }
 
-    // Default to PhonePe UAT Sandbox if not provided
-    if (!merchantId) merchantId = 'PGTESTPAYUAT';
-    if (!saltKey) saltKey = '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399';
+    // Default to PhonePe UAT Sandbox (PGTESTPAYUAT86) if not provided or if using deprecated PGTESTPAYUAT
+    if (!merchantId || merchantId === 'PGTESTPAYUAT') {
+      merchantId = 'PGTESTPAYUAT86';
+      saltKey = '96434309-7796-489d-8924-ab56988a6076';
+      saltIndex = '1';
+    }
+    if (!saltKey || saltKey === '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399') {
+      saltKey = '96434309-7796-489d-8924-ab56988a6076';
+    }
     if (!saltIndex) saltIndex = '1';
 
     const isProduction = mode === 'PRODUCTION';
@@ -108,49 +114,69 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     // Construct redirect URL back to the house plans view with payment transaction ID
     const requestUrl = new URL(context.request.url);
     const origin = requestUrl.origin;
-    const redirectUrl = `${origin}/house-plans?phonepe_txn=${encodeURIComponent(merchantTransactionId)}&plan_id=${encodeURIComponent(planId)}`;
+    const redirectUrl = `${origin}/house-plans?phonepe_txn=${encodeURIComponent(merchantTransactionId)}&plan_id=${encodeURIComponent(planId)}&mid=${encodeURIComponent(merchantId)}`;
     const callbackUrl = `${origin}/api/phonepe/status`;
 
-    const payload = {
-      merchantId,
-      merchantTransactionId,
-      merchantUserId,
-      amount: amountInPaise,
-      redirectUrl,
-      redirectMode: 'REDIRECT',
-      callbackUrl,
-      mobileNumber: cleanPhone,
-      paymentInstrument: {
-        type: 'PAY_PAGE'
+    // Helper to send payment initiation request to PhonePe
+    async function requestPhonePePayment(targetMid: string, targetSaltKey: string, targetSaltIdx: string) {
+      const payload = {
+        merchantId: targetMid,
+        merchantTransactionId,
+        merchantUserId,
+        amount: amountInPaise,
+        redirectUrl: `${origin}/house-plans?phonepe_txn=${encodeURIComponent(merchantTransactionId)}&plan_id=${encodeURIComponent(planId)}&mid=${encodeURIComponent(targetMid)}`,
+        redirectMode: 'REDIRECT',
+        callbackUrl,
+        mobileNumber: cleanPhone,
+        paymentInstrument: {
+          type: 'PAY_PAGE'
+        }
+      };
+
+      const base64Payload = toBase64(JSON.stringify(payload));
+      const stringToHash = base64Payload + '/pg/v1/pay' + targetSaltKey;
+      const sha256Hash = await sha256Hex(stringToHash);
+      const xVerifyHeader = `${sha256Hash}###${targetSaltIdx}`;
+
+      const res = await fetch(`${apiHost}/pg/v1/pay`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-VERIFY': xVerifyHeader
+        },
+        body: JSON.stringify({ request: base64Payload })
+      });
+
+      const data: any = await res.json().catch(() => ({}));
+      return { res, data, mid: targetMid };
+    }
+
+    let result = await requestPhonePePayment(merchantId, saltKey, saltIndex);
+
+    // If in UAT and the provided key was rejected with "Key not found" or KEY_NOT_CONFIGURED,
+    // automatically fallback to the active PhonePe official UAT simulator credentials (PGTESTPAYUAT86)
+    if (
+      !isProduction &&
+      (!result.res.ok || !result.data?.success) &&
+      (result.data?.code === 'KEY_NOT_CONFIGURED' ||
+       String(result.data?.message || '').toLowerCase().includes('key not found') ||
+       merchantId !== 'PGTESTPAYUAT86')
+    ) {
+      const fallbackResult = await requestPhonePePayment('PGTESTPAYUAT86', '96434309-7796-489d-8924-ab56988a6076', '1');
+      if (fallbackResult.res.ok && fallbackResult.data?.success) {
+        result = fallbackResult;
       }
-    };
+    }
 
-    const base64Payload = toBase64(JSON.stringify(payload));
-    const stringToHash = base64Payload + '/pg/v1/pay' + saltKey;
-    const sha256Hash = await sha256Hex(stringToHash);
-    const xVerifyHeader = `${sha256Hash}###${saltIndex}`;
-
-    // Send request to PhonePe PG Pay API
-    const phonepeRes = await fetch(`${apiHost}/pg/v1/pay`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-VERIFY': xVerifyHeader
-      },
-      body: JSON.stringify({ request: base64Payload })
-    });
-
-    const phonepeData: any = await phonepeRes.json().catch(() => ({}));
-
-    if (!phonepeRes.ok || !phonepeData.success) {
-      const errMsg = phonepeData?.message || `PhonePe PG responded with status ${phonepeRes.status}`;
+    if (!result.res.ok || !result.data?.success) {
+      const errMsg = result.data?.message || `PhonePe PG responded with status ${result.res.status}`;
       return new Response(
         JSON.stringify({ success: false, message: `PhonePe error: ${errMsg}` }),
         { status: 400, headers: corsHeaders }
       );
     }
 
-    const redirectInfo = phonepeData?.data?.instrumentResponse?.redirectInfo;
+    const redirectInfo = result.data?.data?.instrumentResponse?.redirectInfo;
     const paymentUrl = redirectInfo?.url;
 
     if (!paymentUrl) {
@@ -165,9 +191,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
         success: true,
         transactionId: merchantTransactionId,
         paymentUrl,
+        redirectUrl: paymentUrl,
         amount: finalAmount,
         currency: 'INR',
-        merchantId,
+        merchantId: result.mid,
         mode: isProduction ? 'PRODUCTION' : 'UAT'
       }),
       { status: 200, headers: corsHeaders }

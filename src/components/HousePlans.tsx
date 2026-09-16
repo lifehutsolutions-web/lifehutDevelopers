@@ -139,9 +139,10 @@ export const HousePlans: React.FC<HousePlansProps> = ({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const searchParams = new URLSearchParams(window.location.search);
-    const isPhonePeReturn = searchParams.get('payment') === 'phonepe' || searchParams.has('txnId');
-    const txnId = searchParams.get('txnId') || searchParams.get('transactionId');
-    const planId = searchParams.get('planId');
+    const txnId = searchParams.get('phonepe_txn') || searchParams.get('txnId') || searchParams.get('transactionId');
+    const planId = searchParams.get('plan_id') || searchParams.get('planId');
+    const mid = searchParams.get('mid') || '';
+    const isPhonePeReturn = searchParams.get('payment') === 'phonepe' || searchParams.has('txnId') || searchParams.has('phonepe_txn') || searchParams.has('transactionId');
 
     if (isPhonePeReturn && txnId) {
       const verifyPhonePePayment = async () => {
@@ -155,7 +156,7 @@ export const HousePlans: React.FC<HousePlansProps> = ({
             }
           }
 
-          const res = await fetch(`/api/phonepe/status?transactionId=${encodeURIComponent(txnId)}&planId=${encodeURIComponent(planId || '')}`);
+          const res = await fetch(`/api/phonepe/status?transactionId=${encodeURIComponent(txnId)}&planId=${encodeURIComponent(planId || '')}&mid=${encodeURIComponent(mid)}`);
           const data = await res.json().catch(() => null);
 
           if (data && (data.verified || data.success) && data.downloadUrl) {
@@ -466,7 +467,7 @@ Chennai, Tamil Nadu
       }
 
       // Redirect to PhonePe Pay Page (UPI QR, Google Pay, PhonePe, Cards, NetBanking)
-      const checkoutUrl = payData.redirectUrl || payData.instrumentResponse?.redirectInfo?.url;
+      const checkoutUrl = payData.paymentUrl || payData.redirectUrl || payData.instrumentResponse?.redirectInfo?.url;
       if (checkoutUrl) {
         window.location.href = checkoutUrl;
         return;
