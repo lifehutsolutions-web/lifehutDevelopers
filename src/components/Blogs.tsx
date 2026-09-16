@@ -107,7 +107,7 @@ export const Blogs: React.FC<BlogsProps> = ({
 
   const handleAddComment = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedBlogId || !commentName.trim() || !commentText.trim()) return;
+    if (!selectedBlog || !commentName.trim() || !commentText.trim()) return;
 
     const newComment = {
       author: commentName.trim(),
@@ -117,7 +117,7 @@ export const Blogs: React.FC<BlogsProps> = ({
 
     setComments(prev => ({
       ...prev,
-      [selectedBlogId]: [...(prev[selectedBlogId] || []), newComment]
+      [selectedBlog.id]: [...(prev[selectedBlog.id] || []), newComment]
     }));
 
     setCommentName('');

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { SEO } from './components/SEO';
@@ -226,10 +226,6 @@ export default function App() {
       } else if (route.type === 'refund-policy') {
         setActiveTab('refund-policy');
         setActivePolicy('refund-policy');
-      } else if (route.type === 'legal') {
-        const policy = route.policy || 'refund-policy';
-        setActiveTab(policy);
-        setActivePolicy(policy as LegalTabType);
       } else if (route.type === 'house-plans') {
         setActiveTab('house-plans');
         setSelectedPlanSlug(route.slug || null);
@@ -428,6 +424,26 @@ export default function App() {
 
   const heroImage = settings?.heroBannerImage || defaultSettings.heroBannerImage || "/src/assets/images/hero_villa_1784191464588.jpg";
 
+  const activePlanForSEO = useMemo(() => {
+    if (!selectedPlanSlug) return null;
+    return findPlan(housePlans, selectedPlanSlug);
+  }, [selectedPlanSlug, housePlans]);
+
+  const activeServiceForSEO = useMemo(() => {
+    if (!selectedServiceId) return null;
+    return findService(services, selectedServiceId);
+  }, [selectedServiceId, services]);
+
+  const activeProjectForSEO = useMemo(() => {
+    if (!selectedProjectId) return null;
+    return findProject(projects, selectedProjectId);
+  }, [selectedProjectId, projects]);
+
+  const activeBlogForSEO = useMemo(() => {
+    if (!selectedBlogSlug) return null;
+    return findBlog(blogs, selectedBlogSlug);
+  }, [selectedBlogSlug, blogs]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center text-slate-800 gap-3 font-display">
@@ -446,40 +462,43 @@ export default function App() {
           title={settings?.seoTitle || "Top Residential Building Construction Company in Chennai | Lifehut Developers"}
           description={settings?.seoDescription || "Leading residential building construction company in Chennai offering turnkey villa construction, transparent packages, and on-time handover."}
           keywords={settings?.seoKeywords || "residential building construction company, turnkey house builders chennai, villa contractors"}
+          canonicalPath="/"
         />
       )}
       {activeTab === 'house-plans' && (
         <SEO
           title={
-            selectedPlanSlug && housePlans.find(p => p.slug === selectedPlanSlug)
-              ? `${housePlans.find(p => p.slug === selectedPlanSlug)?.title} | Turnkey House Plans`
+            activePlanForSEO
+              ? `${activePlanForSEO.title} | Turnkey House Plans`
               : "House Plans in Chennai | 100% Vastu Architectural Floor Designs"
           }
           description={
-            selectedPlanSlug && housePlans.find(p => p.slug === selectedPlanSlug)
-              ? `${housePlans.find(p => p.slug === selectedPlanSlug)?.description}`
+            activePlanForSEO
+              ? `${activePlanForSEO.description}`
               : "Explore architect-drafted house plans in Chennai. 1500 sq.ft, 1800 sq.ft, duplex villa floor plans, 100% Vastu compliant with estimated turnkey construction budgets."
           }
           keywords={
-            selectedPlanSlug && housePlans.find(p => p.slug === selectedPlanSlug)
-              ? `${housePlans.find(p => p.slug === selectedPlanSlug)?.seoMeta?.keywords || "house plans chennai"}`
+            activePlanForSEO
+              ? `${activePlanForSEO.seoMeta?.keywords || "house plans chennai"}`
               : "house plans chennai, 1500 sqft house plan, 1 storey house design, duplex floor plan chennai, vastu house plans"
           }
-          canonicalPath={selectedPlanSlug ? `/house-plans/${selectedPlanSlug}` : "/house-plans"}
+          canonicalPath={activePlanForSEO ? `/house-plans/${encodeURIComponent(activePlanForSEO.slug)}` : "/house-plans"}
         />
       )}
       {activeTab === 'services' && (
         <SEO
-          title="Services | High-End Residential Construction"
-          description="Explore our specialized construction services: Custom Luxury Villas, turnkey home construction, structural stress analyses, and blueprint consultations."
+          title={activeServiceForSEO ? `${activeServiceForSEO.title} | Construction Services` : "Services | High-End Residential Construction"}
+          description={activeServiceForSEO ? activeServiceForSEO.description : "Explore our specialized construction services: Custom Luxury Villas, turnkey home construction, structural stress analyses, and blueprint consultations."}
           keywords="luxury villas, civil consulting, turnkey contracts Chennai"
+          canonicalPath={activeServiceForSEO ? `/services/${encodeURIComponent(activeServiceForSEO.id)}` : "/services"}
         />
       )}
       {activeTab === 'projects' && (
         <SEO
-          title="Portfolio | Elite Architectural Masterpieces"
-          description="Browse completed projects and explore structural metrics, plot dimensions, building configurations, and testimonials from verified Chennai homeowners."
+          title={activeProjectForSEO ? `${activeProjectForSEO.name} | Completed Project Portfolio` : "Portfolio | Elite Architectural Masterpieces"}
+          description={activeProjectForSEO ? `${activeProjectForSEO.name} - ${activeProjectForSEO.location}. ${activeProjectForSEO.details}` : "Browse completed projects and explore structural metrics, plot dimensions, building configurations, and testimonials from verified Chennai homeowners."}
           keywords="villa construction portfolio, custom homes Chennai"
+          canonicalPath={activeProjectForSEO ? `/projects/${encodeURIComponent(activeProjectForSEO.id)}` : "/projects"}
         />
       )}
       {activeTab === 'pricing' && (
@@ -487,13 +506,15 @@ export default function App() {
           title="Pricing Plans | Locked Specification Budgets"
           description="Explore Basic, Standard, and Premium construction contracts. Direct material specifications, steel ratios, and flooring choices compared transparently."
           keywords="construction price per sqft Chennai, builder cost estimate"
+          canonicalPath="/pricing"
         />
       )}
       {activeTab === 'blogs' && (
         <SEO
-          title="Construction Manuals | Civil Engineering Insights"
-          description="Review expert articles detailing structural footing design, steel reinforcement ratios, block comparisons, and financial invoice tracking."
+          title={activeBlogForSEO ? `${activeBlogForSEO.title} | Engineering Guides` : "Construction Manuals | Civil Engineering Insights"}
+          description={activeBlogForSEO ? activeBlogForSEO.summary : "Review expert articles detailing structural footing design, steel reinforcement ratios, block comparisons, and financial invoice tracking."}
           keywords="construction manual, builder tips, structural guides"
+          canonicalPath={activeBlogForSEO ? `/blogs/${encodeURIComponent(activeBlogForSEO.slug || activeBlogForSEO.id)}` : "/blogs"}
         />
       )}
       {activeTab === 'quote' && (
@@ -501,6 +522,7 @@ export default function App() {
           title="Interactive Budget Calculator | Instant Turnkey Quotes"
           description="Input your area and proposed floors to generate a customized budget estimation based on current Chennai brick and steel market pricing."
           keywords="home construction calculator Chennai, live quote generator"
+          canonicalPath="/quote"
         />
       )}
       {activeTab === 'contact' && (
@@ -508,6 +530,7 @@ export default function App() {
           title="Contact Headquarters | Schedule Blueprint Consultation"
           description="Reach our Keelkattalai headquarters. Schedule an on-site structural engineering review, or speak directly to our Principal civil engineer."
           keywords="builder contact Chennai, Keelkattalai office"
+          canonicalPath="/contact"
         />
       )}
       {['privacy-policy', 'terms-and-conditions', 'refund-policy', 'legal'].includes(activeTab) && (
@@ -540,9 +563,9 @@ export default function App() {
       {/* Persistent Navigation */}
       <Navbar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleSetActiveTab}
         isAdminLoggedIn={isAdminLoggedIn}
-        onAdminClick={() => setActiveTab('admin')}
+        onAdminClick={() => handleSetActiveTab('admin')}
         onLogout={handleAdminLogout}
         phone={phone}
       />
@@ -560,7 +583,7 @@ export default function App() {
               transition={{ duration: 0.3 }}
             >
               <HomePage
-                setActiveTab={setActiveTab}
+                setActiveTab={handleSetActiveTab}
                 phone={phone}
                 email={email}
                 address={address}
@@ -585,8 +608,10 @@ export default function App() {
             >
               <HousePlans
                 housePlans={housePlans}
-                setActiveTab={setActiveTab}
+                setActiveTab={handleSetActiveTab}
                 initialSelectedSlug={selectedPlanSlug}
+                selectedSlug={selectedPlanSlug}
+                onSelectPlan={handleSelectPlan}
                 phone={phone}
                 settings={settings}
               />
@@ -603,7 +628,9 @@ export default function App() {
             >
               <Services
                 services={services}
-                setActiveTab={setActiveTab}
+                setActiveTab={handleSetActiveTab}
+                selectedServiceId={selectedServiceId}
+                onSelectService={handleSelectService}
               />
             </motion.div>
           )}
@@ -618,7 +645,9 @@ export default function App() {
             >
               <Projects
                 projects={projects}
-                setActiveTab={setActiveTab}
+                setActiveTab={handleSetActiveTab}
+                selectedProjectId={selectedProjectId}
+                onSelectProject={handleSelectProject}
               />
             </motion.div>
           )}
@@ -632,7 +661,7 @@ export default function App() {
               transition={{ duration: 0.3 }}
             >
               <Pricing
-                setActiveTab={setActiveTab}
+                setActiveTab={handleSetActiveTab}
               />
             </motion.div>
           )}
@@ -647,7 +676,9 @@ export default function App() {
             >
               <Blogs
                 blogs={blogs}
-                setActiveTab={setActiveTab}
+                setActiveTab={handleSetActiveTab}
+                selectedBlogSlug={selectedBlogSlug}
+                onSelectBlog={handleSelectBlog}
               />
             </motion.div>
           )}
@@ -661,7 +692,7 @@ export default function App() {
               transition={{ duration: 0.3 }}
             >
               <QuoteForm
-                setActiveTab={setActiveTab}
+                setActiveTab={handleSetActiveTab}
               />
             </motion.div>
           )}
@@ -698,9 +729,9 @@ export default function App() {
                 }
                 setActivePolicy={(p) => {
                   setActivePolicy(p);
-                  setActiveTab(p);
+                  handleSetActiveTab(p);
                 }}
-                setActiveTab={setActiveTab}
+                setActiveTab={handleSetActiveTab}
                 phone={phone}
                 email={email}
                 address={address}
@@ -736,7 +767,7 @@ export default function App() {
 
       {/* Persistent Footer */}
       <Footer
-        setActiveTab={setActiveTab}
+        setActiveTab={handleSetActiveTab}
         address={address}
         phone={phone}
         email={email}
@@ -748,7 +779,7 @@ export default function App() {
 
       {/* Floating Quick Actions (WhatsApp, Phone Call, Instant Quote & Scroll-to-top) */}
       <FloatingQuickActions
-        setActiveTab={setActiveTab}
+        setActiveTab={handleSetActiveTab}
         phone={phone}
       />
 

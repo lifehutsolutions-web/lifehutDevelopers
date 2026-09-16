@@ -33,9 +33,11 @@ export function normalizeSlug(text: string): string {
 /**
  * Parses the current window.location pathname and hash into an AppRoute.
  */
-export function parseCurrentRoute(pathname: string, hash: string): AppRoute {
-  const cleanPath = (pathname || '').trim().replace(/\/+$/, '') || '/';
-  const cleanHash = (hash || '').trim().toLowerCase();
+export function parseCurrentRoute(pathname?: string, hash?: string): AppRoute {
+  const currentPathname = pathname !== undefined ? pathname : (typeof window !== 'undefined' ? window.location.pathname : '/');
+  const currentHash = hash !== undefined ? hash : (typeof window !== 'undefined' ? window.location.hash : '');
+  const cleanPath = (currentPathname || '').trim().replace(/\/+$/, '') || '/';
+  const cleanHash = (currentHash || '').trim().toLowerCase();
 
   // Admin routing
   if (cleanHash === '#admin' || cleanPath === '/admin') {
