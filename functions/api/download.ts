@@ -1,10 +1,10 @@
 // Cloudflare Pages Function: GET /api/download
-// Validates cryptographic download token issued after PhonePe payment verification
+// Validates cryptographic download token issued after Razorpay payment verification
 // Blocks any download attempts without valid payment verification
 
 interface Env {
   DOWNLOAD_SECRET?: string;
-  PHONEPE_SALT_KEY?: string;
+  RAZORPAY_KEY_SECRET?: string;
   [key: string]: any;
 }
 
@@ -51,7 +51,7 @@ export const onRequestGet = async (context: { request: Request; env: Env }) => {
     return new Response(
       JSON.stringify({
         success: false,
-        message: 'Payment verification required. Downloads are strictly protected and require a verified purchase through PhonePe checkout.'
+        message: 'Payment verification required. Downloads are strictly protected and require a verified purchase through Razorpay checkout.'
       }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -76,7 +76,7 @@ export const onRequestGet = async (context: { request: Request; env: Env }) => {
     );
   }
 
-  const downloadSecret = context.env.DOWNLOAD_SECRET || context.env.PHONEPE_SALT_KEY || 'lifehut_secure_cad_token_key';
+  const downloadSecret = context.env.DOWNLOAD_SECRET || context.env.RAZORPAY_KEY_SECRET || 'lifehut_secure_cad_token_key';
   const tokenPayload = `${planId}:${paymentId}:${expiresAt}`;
   const expectedSignature = await hmacSha256(downloadSecret, tokenPayload);
 

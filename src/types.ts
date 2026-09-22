@@ -166,12 +166,10 @@ export interface SiteSettings {
   seoDescription: string;
   seoKeywords: string;
   stats?: Stats;
-  // PhonePe Gateway Settings
-  phonepeMerchantId?: string;
-  phonepeSaltKey?: string;
-  phonepeSaltIndex?: string;
-  phonepeMode?: 'UAT' | 'PRODUCTION';
-  phonepeEnabled?: boolean;
+  // Razorpay Gateway Settings
+  razorpayKeyId?: string;
+  razorpayKeySecret?: string;
+  razorpayEnabled?: boolean;
 }
 
 export interface CMSData {

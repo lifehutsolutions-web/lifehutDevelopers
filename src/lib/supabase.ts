@@ -300,67 +300,21 @@ function parseProjectTags(rawTags: any, fallbackTags?: string[], projectName?: s
 }
 
 // --- PROJECTS DB HELPERS ---
-let hasAutoBackfilledProjects = false;
-
 export async function fetchSupabaseProjects(): Promise<Project[] | null> {
   if (!supabase) return null;
-
-  let rawData: any[] | null = null;
-  let queryError: any = null;
-
-  try {
-    // Select without unindexed .order() to avoid PostgreSQL statement timeout (57014) on large base64 image rows
-    const { data, error } = await supabase.from('projects').select('*');
-    if (!error && Array.isArray(data)) {
-      rawData = data;
-    } else {
-      queryError = error;
-    }
-  } catch (err: any) {
-    queryError = err;
+  const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
+  if (error) {
+    console.error('Error fetching projects from Supabase:', error);
+    return null;
   }
-
-  // If Supabase timed out or errored, seamlessly fallback to server API or local storage
-  if (queryError || !rawData) {
-    console.warn('Supabase projects query notice, falling back to server API/cache:', queryError?.message || queryError);
-    try {
-      const serverRes = await fetch('/api/projects');
-      if (serverRes.ok) {
-        const serverProjects = await serverRes.json();
-        if (Array.isArray(serverProjects) && serverProjects.length > 0) {
-          return serverProjects;
-        }
-      }
-    } catch {}
-
-    try {
-      const local = localStorage.getItem('lifehut_local_projects');
-      if (local) {
-        const parsed = JSON.parse(local);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-
-    return defaultProjects;
-  }
-
-  // Sort by created_at descending safely in fast JavaScript memory (< 1ms)
-  rawData.sort((a, b) => {
-    const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
-    const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
-    return timeB - timeA;
-  });
 
   // Fetch remote project metadata map from Supabase settings
-  let remoteMetaMap: Record<string, ProjectMetadataItem> = {};
-  try {
-    remoteMetaMap = await fetchProjectMetaFromSupabase();
-  } catch {}
+  const remoteMetaMap = await fetchProjectMetaFromSupabase();
   const localMetaMap = getLocalProjectMetadataMap();
 
   const projectsToAutoBackfill: { id: string; clientName: string; clientTestimonial?: string; clientAvatar?: string; tags?: string[]; isRecent?: boolean }[] = [];
 
-  const projects = rawData.map(item => {
+  const projects = data.map(item => {
     // 1. Extract embedded metadata from gallery array if present
     let embeddedMeta: any = {};
     const cleanGallery: string[] = [];
@@ -400,6 +354,11 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
     const tags = parseProjectTags(rawTags, undefined, item.name);
 
     // Resolve clientName with multiple robust fallbacks:
+    // 1. Direct row column item.client_name
+    // 2. Embedded gallery meta embeddedMeta.clientName
+    // 3. Settings table project_metadata_map remoteMeta.clientName
+    // 4. Local storage metadata
+    // 5. Default projects match
     const clientName = (item.client_name && item.client_name.trim())
       || (embeddedMeta.clientName && embeddedMeta.clientName.trim())
       || (item.clientName && item.clientName.trim())
@@ -423,9 +382,10 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
       || localMeta.clientAvatar
       || (clientName ? clientName.split(' ').map((s: string) => s[0]).join('').slice(0, 2).toUpperCase() : 'LH');
 
-    // Only backfill if client_name is genuinely empty in DB and hasn't been synced this session
+    // If client_name or gallery metadata is missing on the Supabase row, schedule silent background update
     const missingClientNameInDb = !item.client_name || item.client_name.trim() === '';
-    if (!hasAutoBackfilledProjects && missingClientNameInDb && clientName) {
+    const missingEmbeddedMeta = !embeddedMeta.tags || embeddedMeta.tags.length === 0;
+    if ((missingClientNameInDb && clientName) || missingEmbeddedMeta) {
       projectsToAutoBackfill.push({
         id: item.id,
         clientName,
@@ -457,30 +417,40 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
     };
   });
 
-  // Auto-backfill in background at most once per session without hammering Postgres
-  if (!hasAutoBackfilledProjects && projectsToAutoBackfill.length > 0) {
-    hasAutoBackfilledProjects = true;
+  // Auto-backfill empty client_name and tags metadata in Supabase in background
+  if (projectsToAutoBackfill.length > 0) {
     setTimeout(async () => {
       for (const p of projectsToAutoBackfill) {
         try {
           const updatePayload: Record<string, any> = {};
-          if (p.clientName) updatePayload.client_name = p.clientName;
-          if (p.clientTestimonial) updatePayload.client_testimonial = p.clientTestimonial;
-          if (p.clientAvatar) updatePayload.client_avatar = p.clientAvatar;
+          if (p.clientName) {
+            updatePayload.client_name = p.clientName;
+          }
+          if (p.clientTestimonial) {
+            updatePayload.client_testimonial = p.clientTestimonial;
+          }
+          if (p.clientAvatar) {
+            updatePayload.client_avatar = p.clientAvatar;
+          }
+
+          // Fetch current gallery and embed metadata
+          const { data: row } = await supabase.from('projects').select('gallery, hero_image').eq('id', p.id).single();
+          if (row) {
+            const rawG = Array.isArray(row.gallery) ? row.gallery : (row.hero_image ? [row.hero_image] : []);
+            const clean = rawG.filter((g: any) => typeof g === 'string' && !g.includes('__meta') && (g.startsWith('http') || g.startsWith('/')));
+            updatePayload.gallery = [
+              ...clean,
+              { __meta: { tags: p.tags, isRecent: p.isRecent, clientName: p.clientName, clientAvatar: p.clientAvatar } }
+            ];
+          }
+
           await supabase.from('projects').update(updatePayload).eq('id', p.id);
         } catch {
           // Silent fallback
         }
       }
-    }, 2000);
-  } else {
-    hasAutoBackfilledProjects = true;
+    }, 100);
   }
-
-  // Cache to localStorage for fast access & offline resilience
-  try {
-    localStorage.setItem('lifehut_local_projects', JSON.stringify(projects));
-  } catch {}
 
   return projects;
 }
@@ -700,37 +670,32 @@ export async function fetchSupabaseSettings(): Promise<Settings | null> {
     return null;
   }
   const data = res.data[0];
-  const statsObj = (data.stats && typeof data.stats === 'object') ? data.stats : {};
-
   return {
-    heroTitle: data.hero_title || statsObj.heroTitle || '',
-    heroSubtitle: data.hero_subtitle || statsObj.heroSubtitle || '',
-    heroBannerImage: data.hero_banner_image || statsObj.heroBannerImage || '',
-    address: data.address || statsObj.address || '',
-    phone: data.phone || statsObj.phone || '',
-    email: data.email || statsObj.email || '',
-    hours: data.hours || statsObj.hours || '',
-    whatsappNumber: data.whatsapp_number || statsObj.whatsappNumber || '',
-    facebookUrl: data.facebook_url || statsObj.facebookUrl || '',
-    instagramUrl: data.instagram_url || statsObj.instagramUrl || '',
-    pinterestUrl: data.pinterest_url || statsObj.pinterestUrl || '',
-    youtubeUrl: statsObj.youtubeUrl || data.youtube_url || '',
-    linkedinUrl: data.linkedin_url || statsObj.linkedinUrl || '',
-    seoTitle: data.seo_title || statsObj.seoTitle || '',
-    seoDescription: data.seo_description || statsObj.seoDescription || '',
-    seoKeywords: data.seo_keywords || statsObj.seoKeywords || '',
-    stats: {
-      projectsDone: statsObj.projectsDone || "120+",
-      experienceYears: statsObj.experienceYears || "7+",
-      clientSatisfaction: statsObj.clientSatisfaction || "99%",
-      hiddenCharges: statsObj.hiddenCharges || "₹0",
-      ...statsObj
+    heroTitle: data.hero_title || '',
+    heroSubtitle: data.hero_subtitle || '',
+    heroBannerImage: data.hero_banner_image || '',
+    address: data.address || '',
+    phone: data.phone || '',
+    email: data.email || '',
+    hours: data.hours || '',
+    whatsappNumber: data.whatsapp_number || '',
+    facebookUrl: data.facebook_url || '',
+    instagramUrl: data.instagram_url || '',
+    pinterestUrl: data.pinterest_url || '',
+    youtubeUrl: data.youtube_url || '',
+    linkedinUrl: data.linkedin_url || '',
+    seoTitle: data.seo_title || '',
+    seoDescription: data.seo_description || '',
+    seoKeywords: data.seo_keywords || '',
+    stats: data.stats || {
+      projectsDone: "120+",
+      experienceYears: "7+",
+      clientSatisfaction: "99%",
+      hiddenCharges: "₹0"
     },
-    phonepeMerchantId: data.phonepeMerchantId || statsObj.phonepeMerchantId || '',
-    phonepeSaltKey: data.phonepeSaltKey || statsObj.phonepeSaltKey || '',
-    phonepeSaltIndex: data.phonepeSaltIndex || statsObj.phonepeSaltIndex || '1',
-    phonepeMode: data.phonepeMode || statsObj.phonepeMode || 'UAT',
-    phonepeEnabled: data.phonepeEnabled !== undefined ? data.phonepeEnabled : (statsObj.phonepeEnabled !== undefined ? statsObj.phonepeEnabled : true)
+    razorpayKeyId: data.razorpayKeyId || data.stats?.razorpayKeyId || '',
+    razorpayKeySecret: data.razorpayKeySecret || data.stats?.razorpayKeySecret || '',
+    razorpayEnabled: data.razorpayEnabled !== undefined ? data.razorpayEnabled : (data.stats?.razorpayEnabled !== undefined ? data.stats.razorpayEnabled : true)
   };
 }
 
@@ -753,36 +718,11 @@ export async function saveSupabaseSettings(settings: Settings): Promise<boolean>
   const mergedStats = {
     ...existingStats,
     ...(settings.stats || {}),
-    projectsDone: settings.stats?.projectsDone ?? existingStats.projectsDone ?? '120+',
-    experienceYears: settings.stats?.experienceYears ?? existingStats.experienceYears ?? '7+',
-    clientSatisfaction: settings.stats?.clientSatisfaction ?? existingStats.clientSatisfaction ?? '99%',
-    hiddenCharges: settings.stats?.hiddenCharges ?? existingStats.hiddenCharges ?? '₹0',
-    youtubeUrl: settings.youtubeUrl !== undefined ? settings.youtubeUrl : (existingStats.youtubeUrl || ''),
-    // Store mirrors inside stats JSONB for high-resilience retrieval
-    heroTitle: settings.heroTitle,
-    heroSubtitle: settings.heroSubtitle,
-    heroBannerImage: settings.heroBannerImage,
-    address: settings.address,
-    phone: settings.phone,
-    email: settings.email,
-    hours: settings.hours,
-    whatsappNumber: settings.whatsappNumber,
-    facebookUrl: settings.facebookUrl,
-    instagramUrl: settings.instagramUrl,
-    pinterestUrl: settings.pinterestUrl,
-    linkedinUrl: settings.linkedinUrl,
-    seoTitle: settings.seoTitle,
-    seoDescription: settings.seoDescription,
-    seoKeywords: settings.seoKeywords,
-    phonepeMerchantId: settings.phonepeMerchantId !== undefined ? settings.phonepeMerchantId : (existingStats.phonepeMerchantId || ''),
-    phonepeSaltKey: settings.phonepeSaltKey !== undefined ? settings.phonepeSaltKey : (existingStats.phonepeSaltKey || ''),
-    phonepeSaltIndex: settings.phonepeSaltIndex !== undefined ? settings.phonepeSaltIndex : (existingStats.phonepeSaltIndex || '1'),
-    phonepeMode: settings.phonepeMode !== undefined ? settings.phonepeMode : (existingStats.phonepeMode || 'UAT'),
-    phonepeEnabled: settings.phonepeEnabled !== undefined ? settings.phonepeEnabled : (existingStats.phonepeEnabled !== undefined ? existingStats.phonepeEnabled : true)
+    razorpayKeyId: settings.razorpayKeyId || existingStats.razorpayKeyId || '',
+    razorpayKeySecret: settings.razorpayKeySecret || existingStats.razorpayKeySecret || '',
+    razorpayEnabled: settings.razorpayEnabled !== undefined ? settings.razorpayEnabled : (existingStats.razorpayEnabled !== undefined ? existingStats.razorpayEnabled : true)
   };
 
-  // Note: Only include columns that actually exist on the 'settings' table in Supabase.
-  // 'youtube_url' does NOT exist as a column in the table schema, so it is stored safely inside 'stats'.
   const payload: any = {
     hero_title: settings.heroTitle,
     hero_subtitle: settings.heroSubtitle,
@@ -795,6 +735,7 @@ export async function saveSupabaseSettings(settings: Settings): Promise<boolean>
     facebook_url: settings.facebookUrl,
     instagram_url: settings.instagramUrl,
     pinterest_url: settings.pinterestUrl,
+    youtube_url: settings.youtubeUrl,
     linkedin_url: settings.linkedinUrl,
     seo_title: settings.seoTitle,
     seo_description: settings.seoDescription,
@@ -804,6 +745,7 @@ export async function saveSupabaseSettings(settings: Settings): Promise<boolean>
   };
 
   // 1. If row already exists in settings, perform an UPDATE (PATCH).
+  // This avoids 405 Method Not Allowed on PostgREST upsert (POST)!
   if (existingRowId !== null) {
     const { error: updateError } = await supabase.from('settings').update(payload).eq('id', existingRowId);
     if (!updateError) {
@@ -868,14 +810,10 @@ export async function fetchSupabaseHousePlans(): Promise<HousePlan[] | null> {
     try {
       const { data, error } = await supabase
         .from('house_plans')
-        .select('*');
+        .select('*')
+        .order('created_at', { ascending: false });
 
       if (!error && data && data.length > 0) {
-        data.sort((a, b) => {
-          const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
-          const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
-          return timeB - timeA;
-        });
         const plans: HousePlan[] = data.map(item => ({
           id: item.id,
           planCode: item.plan_code || item.planCode || 'LH-HP-000',
@@ -1106,11 +1044,8 @@ export async function deleteSupabaseHousePlan(id: string): Promise<boolean> {
  * 2. Site settings stats contain project_metadata_map and house_plans catalog.
  * 3. Client names and tags survive all browser clears, deploys, and device switches.
  */
-let hasAutoMigrated = false;
-
 export async function autoMigrateAndSyncSupabase(): Promise<void> {
-  if (!supabase || hasAutoMigrated) return;
-  hasAutoMigrated = true;
+  if (!supabase) return;
 
   try {
     // 1. Fetch current settings row
@@ -1198,22 +1133,17 @@ export async function autoMigrateAndSyncSupabase(): Promise<void> {
 
     // 4. If settings stats need sync, save them
     if (hasStatsUpdate || !currentStats.house_plans || currentStats.house_plans.length === 0) {
-      // Re-fetch latest settings row to ensure we never overwrite user-saved changes
-      const freshRes = await supabase.from('settings').select('*').limit(1);
-      const freshRow = (freshRes.data && freshRes.data.length > 0) ? freshRes.data[0] : settingsRow;
-      const latestStats = (freshRow && typeof freshRow.stats === 'object') ? freshRow.stats : currentStats;
-
       const mergedStats = {
-        ...latestStats,
+        ...currentStats,
         project_metadata_map: remoteMetaMap,
-        house_plans: (latestStats.house_plans && latestStats.house_plans.length > 0) ? latestStats.house_plans : defaultHousePlans
+        house_plans: (currentStats.house_plans && currentStats.house_plans.length > 0) ? currentStats.house_plans : defaultHousePlans
       };
 
-      if (freshRow) {
+      if (settingsRow) {
         await supabase.from('settings').update({
           stats: mergedStats,
           updated_at: new Date().toISOString()
-        }).eq('id', freshRow.id);
+        }).eq('id', settingsRow.id);
       } else {
         await supabase.from('settings').upsert({
           id: 'site_settings',

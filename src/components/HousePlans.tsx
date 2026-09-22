@@ -41,7 +41,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Breadcrumbs } from './Breadcrumbs';
 import { HousePlan, Settings } from '../types';
 import { defaultHousePlans } from '../data/defaultHousePlans';
-import { findPlan } from '../lib/routing';
 
 interface HousePlansProps {
   housePlans?: HousePlan[];
@@ -96,8 +95,8 @@ export const HousePlans: React.FC<HousePlansProps> = ({
   const [formSubmitted, setFormSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // PhonePe payment flow states
-  const [phonepeLoading, setPhonepeLoading] = useState(false);
+  // Razorpay payment flow states
+  const [razorpayLoading, setRazorpayLoading] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [paymentTxnId, setPaymentTxnId] = useState<string | null>(null);
   const [authorizedDownloadUrl, setAuthorizedDownloadUrl] = useState<string | null>(null);
@@ -124,66 +123,15 @@ export const HousePlans: React.FC<HousePlansProps> = ({
 
   // Sync external selected slug
   useEffect(() => {
-    const targetSlug = selectedSlug !== undefined ? selectedSlug : initialSelectedSlug;
-    if (targetSlug !== currentSlug) {
-      setCurrentSlug(targetSlug);
+    if (selectedSlug !== currentSlug) {
+      setCurrentSlug(selectedSlug);
     }
-  }, [selectedSlug, initialSelectedSlug]);
+  }, [selectedSlug]);
 
   const activePlan = useMemo(() => {
     if (!currentSlug) return null;
-    return findPlan(plans, currentSlug);
+    return plans.find(p => p.slug === currentSlug || p.id === currentSlug) || null;
   }, [currentSlug, plans]);
-
-  // Handle PhonePe Payment Return Callback (Redirect from PhonePe Gateway)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const searchParams = new URLSearchParams(window.location.search);
-    const txnId = searchParams.get('phonepe_txn') || searchParams.get('txnId') || searchParams.get('transactionId');
-    const planId = searchParams.get('plan_id') || searchParams.get('planId');
-    const mid = searchParams.get('mid') || '';
-    const isPhonePeReturn = searchParams.get('payment') === 'phonepe' || searchParams.has('txnId') || searchParams.has('phonepe_txn') || searchParams.has('transactionId');
-
-    if (isPhonePeReturn && txnId) {
-      const verifyPhonePePayment = async () => {
-        setPhonepeLoading(true);
-        setIsPdfModalOpen(true);
-        try {
-          if (planId) {
-            const matchedPlan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId);
-            if (matchedPlan) {
-              setPlanForCadModal(matchedPlan);
-            }
-          }
-
-          const res = await fetch(`/api/phonepe/status?transactionId=${encodeURIComponent(txnId)}&planId=${encodeURIComponent(planId || '')}&mid=${encodeURIComponent(mid)}`);
-          const data = await res.json().catch(() => null);
-
-          if (data && (data.verified || data.success) && data.downloadUrl) {
-            setPaymentSuccess(true);
-            setPaymentTxnId(data.paymentId || txnId);
-            setAuthorizedDownloadUrl(data.downloadUrl);
-            setPaymentError(null);
-
-            const targetPlan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId) || activePlan;
-            if (targetPlan) {
-              triggerDownloadCadZip(targetPlan, data.downloadUrl);
-            }
-          } else {
-            setPaymentError(data?.message || 'PhonePe payment confirmation pending or not verified. If debited, please contact support.');
-          }
-        } catch (err: any) {
-          setPaymentError('PhonePe verification network error: ' + (err?.message || 'Network error'));
-        } finally {
-          setPhonepeLoading(false);
-          const cleanUrl = window.location.pathname;
-          window.history.replaceState({}, document.title, cleanUrl);
-        }
-      };
-
-      verifyPhonePePayment();
-    }
-  }, [plans, activePlan]);
 
   // Media carousel list for active plan: includes 3D Front Elevation, 2D Floor Plan Blueprint, and all gallery views
   const planMediaList = useMemo(() => {
@@ -280,7 +228,7 @@ export const HousePlans: React.FC<HousePlansProps> = ({
 
     // Security Gate: Paid packages require verified payment URL
     if (!targetUrl && (plan.cadPackagePrice || 0) > 0) {
-      setPaymentError('Payment verification required. Please complete PhonePe checkout to unlock and download this drawings package.');
+      setPaymentError('Payment verification required. Please complete Razorpay checkout to unlock and download this drawings package.');
       return;
     }
 
@@ -355,7 +303,29 @@ Chennai, Tamil Nadu
     }
   };
 
-  const handlePhonePePayment = async (e: React.FormEvent) => {
+  // Dynamically load Razorpay SDK if not already loaded
+  const loadRazorpayScript = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (typeof window !== 'undefined' && (window as any).Razorpay) {
+        return resolve(true);
+      }
+      const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+      if (existingScript) {
+        existingScript.addEventListener('load', () => resolve(true));
+        existingScript.addEventListener('error', () => resolve(false));
+        setTimeout(() => resolve(Boolean((window as any).Razorpay)), 1500);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleRazorpayPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentCadPlan) return;
     if (!clientName || !clientPhone) {
@@ -363,7 +333,7 @@ Chennai, Tamil Nadu
       return;
     }
 
-    setPhonepeLoading(true);
+    setRazorpayLoading(true);
     setPaymentError(null);
 
     try {
@@ -390,26 +360,22 @@ Chennai, Tamil Nadu
         } else {
           setPaymentError(claimData?.message || 'Could not claim free download. Please contact support.');
         }
-        setPhonepeLoading(false);
+        setRazorpayLoading(false);
         return;
       }
 
-      // 1. Resolve any stored PhonePe credentials from settings or local storage
-      let localCreds: { phonepeMerchantId?: string; phonepeSaltKey?: string; phonepeSaltIndex?: string; phonepeMode?: string } = {};
+      // 1. Resolve any stored Razorpay credentials from settings or local storage
+      let localCreds: { razorpayKeyId?: string; razorpayKeySecret?: string } = {};
       try {
         const raw = localStorage.getItem('lifehut_local_settings');
         if (raw) localCreds = JSON.parse(raw);
       } catch {}
 
-      const effectiveMerchantId = (settings?.phonepeMerchantId || localCreds.phonepeMerchantId || '').trim();
-      const effectiveSaltKey = (settings?.phonepeSaltKey || localCreds.phonepeSaltKey || '').trim();
-      const effectiveSaltIndex = (settings?.phonepeSaltIndex || localCreds.phonepeSaltIndex || '1').trim();
-      const effectiveMode = (settings?.phonepeMode || localCreds.phonepeMode || 'UAT').trim();
+      const effectiveKeyId = (settings?.razorpayKeyId || localCreds.razorpayKeyId || '').trim();
+      const effectiveKeySecret = (settings?.razorpayKeySecret || localCreds.razorpayKeySecret || '').trim();
 
-      const redirectUrl = `${window.location.origin}${window.location.pathname}?payment=phonepe&planId=${encodeURIComponent(currentCadPlan.id)}`;
-
-      // 2. Initiate PhonePe Payment on server
-      let payRes = await fetch('/api/phonepe/pay', {
+      // 2. Create Order on server
+      let orderRes = await fetch('/api/payments/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -418,16 +384,13 @@ Chennai, Tamil Nadu
           clientPhone,
           clientEmail,
           amount: currentCadPlan.cadPackagePrice || 999,
-          merchantId: effectiveMerchantId,
-          saltKey: effectiveSaltKey,
-          saltIndex: effectiveSaltIndex,
-          mode: effectiveMode,
-          redirectUrl
+          keyId: effectiveKeyId,
+          keySecret: effectiveKeySecret
         })
       }).catch(() => null);
 
-      if (!payRes || payRes.status === 404) {
-        payRes = await fetch('/api/payments/create-order', {
+      if (!orderRes || orderRes.status === 404) {
+        orderRes = await fetch('/api/razorpay/create-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -436,71 +399,153 @@ Chennai, Tamil Nadu
             clientPhone,
             clientEmail,
             amount: currentCadPlan.cadPackagePrice || 999,
-            merchantId: effectiveMerchantId,
-            saltKey: effectiveSaltKey,
-            saltIndex: effectiveSaltIndex,
-            mode: effectiveMode,
-            redirectUrl
+            keyId: effectiveKeyId,
+            keySecret: effectiveKeySecret
           })
         }).catch(() => null);
       }
 
-      if (!payRes) {
-        throw new Error('Network error: Unable to reach the PhonePe payment server.');
+      if (!orderRes) {
+        throw new Error('Network error: Unable to reach the payment server.');
       }
 
-      const payData = await payRes.json().catch(() => null);
+      const orderContentType = orderRes.headers.get('content-type') || '';
+      let orderData: any = null;
 
-      if (!payRes.ok || !payData) {
-        throw new Error(payData?.message || `Payment initialization failed (HTTP ${payRes.status}).`);
+      if (orderContentType.includes('application/json')) {
+        orderData = await orderRes.json().catch(() => null);
       }
 
-      // If simulated or instantly verified (e.g. sandbox direct verification)
-      if (payData.verified && payData.downloadUrl) {
-        setPaymentTxnId(payData.paymentId || payData.merchantTransactionId || `PP_${Date.now()}`);
-        setAuthorizedDownloadUrl(payData.downloadUrl);
-        setPaymentSuccess(true);
-        setPaymentError(null);
-        triggerDownloadCadZip(currentCadPlan, payData.downloadUrl);
-        setPhonepeLoading(false);
-        return;
+      if (!orderRes.ok || !orderData || !orderData.orderId) {
+        const errorMsg = orderData?.message || `Order creation failed (HTTP ${orderRes.status}).`;
+        throw new Error(errorMsg);
       }
 
-      // Redirect to PhonePe Pay Page (UPI QR, Google Pay, PhonePe, Cards, NetBanking)
-      const checkoutUrl = payData.paymentUrl || payData.redirectUrl || payData.instrumentResponse?.redirectInfo?.url;
-      if (checkoutUrl) {
-        window.location.href = checkoutUrl;
-        return;
+      // 3. Load Razorpay Checkout SDK for Live / Production Gateway
+      const scriptLoaded = await loadRazorpayScript();
+      const RazorpayConstructor = (window as any).Razorpay;
+
+      if (!scriptLoaded || !RazorpayConstructor) {
+        throw new Error('Could not load Razorpay checkout script. Please check your internet connection and try again.');
       }
 
-      throw new Error(payData?.message || 'PhonePe payment checkout URL was not received.');
+      // 5. Open Real Razorpay Checkout
+      const rzpOptions = {
+        key: orderData.keyId || effectiveKeyId,
+        amount: orderData.amount,
+        currency: orderData.currency || 'INR',
+        name: 'Lifehut Developers',
+        description: `${currentCadPlan.planCode} Full CAD & PDF Drawings Package`,
+        image: 'https://lifehutdevelopers.com/favicon.png',
+        order_id: orderData.orderId,
+        modal: {
+          ondismiss: function () {
+            setRazorpayLoading(false);
+          }
+        },
+        handler: async function (response: any) {
+          // This callback ONLY runs if the customer successfully completed payment in the Razorpay gateway
+          try {
+            setRazorpayLoading(true);
+
+            if (!response.razorpay_order_id || !response.razorpay_payment_id || !response.razorpay_signature) {
+              setPaymentError('Payment confirmation missing credentials. Please contact support.');
+              setRazorpayLoading(false);
+              return;
+            }
+
+            // Cryptographically verify signature on the server
+            let verifyRes = await fetch('/api/payments/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                planId: currentCadPlan.id,
+                clientName,
+                clientPhone,
+                clientEmail,
+                notes: 'Live Razorpay Checkout',
+                keySecret: effectiveKeySecret
+              })
+            }).catch(() => null);
+
+            if (!verifyRes || verifyRes.status === 404) {
+              verifyRes = await fetch('/api/razorpay/verify-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                  planId: currentCadPlan.id,
+                  clientName,
+                  clientPhone,
+                  clientEmail,
+                  notes: 'Live Razorpay Checkout',
+                  keySecret: effectiveKeySecret
+                })
+              }).catch(() => null);
+            }
+
+            const verifyData = verifyRes && verifyRes.ok ? await verifyRes.json().catch(() => null) : null;
+
+            if (verifyData && (verifyData.verified || verifyData.success) && verifyData.downloadUrl) {
+              const confirmedTxnId = verifyData.paymentId || response.razorpay_payment_id;
+              setPaymentTxnId(confirmedTxnId);
+              setAuthorizedDownloadUrl(verifyData.downloadUrl);
+              setPaymentSuccess(true);
+              setPaymentError(null);
+
+              // Auto trigger verified download
+              triggerDownloadCadZip(currentCadPlan, verifyData.downloadUrl);
+            } else {
+              setPaymentError(
+                verifyData?.message ||
+                `Payment verification failed. If your money was deducted, please share Payment ID (${response.razorpay_payment_id}) on WhatsApp.`
+              );
+            }
+          } catch (verifyErr: any) {
+            console.warn('Verification network notice:', verifyErr);
+            setPaymentError('Payment verification network error. Please contact support.');
+          } finally {
+            setRazorpayLoading(false);
+          }
+        },
+        prefill: {
+          name: clientName,
+          email: clientEmail || '',
+          contact: clientPhone
+        },
+        notes: {
+          planCode: currentCadPlan.planCode,
+          title: currentCadPlan.title
+        },
+        theme: {
+          color: '#1A6DB5'
+        }
+      };
+
+      const rzp = new RazorpayConstructor(rzpOptions);
+      rzp.on('payment.failed', function (response: any) {
+        setRazorpayLoading(false);
+        setPaymentError(response.error?.description || 'Payment was cancelled or declined.');
+      });
+      rzp.open();
     } catch (err: any) {
-      console.warn('PhonePe checkout notice:', err?.message || err);
-      setPaymentError(err?.message || 'An error occurred while connecting to PhonePe.');
-      setPhonepeLoading(false);
+      console.warn('Razorpay checkout notice:', err?.message || err);
+      setPaymentError(err?.message || 'An error occurred while connecting to Razorpay.');
+      setRazorpayLoading(false);
     }
   };
 
   // Handle selecting a plan
-  const handleSelectPlan = (slugOrIdentifier: string | null) => {
-    if (!slugOrIdentifier) {
-      setCurrentSlug(null);
-      if (onSelectPlan) {
-        onSelectPlan(null);
-      } else {
-        window.history.pushState({}, '', '/house-plans');
-      }
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-    const matched = findPlan(plans, slugOrIdentifier);
-    const chosenSlug = matched ? matched.slug : slugOrIdentifier;
-    setCurrentSlug(chosenSlug);
+  const handleSelectPlan = (slug: string | null) => {
+    setCurrentSlug(slug);
     setActiveCarouselIndex(0);
     if (onSelectPlan) {
-      onSelectPlan(chosenSlug);
-    } else {
-      window.history.pushState({}, '', `/house-plans/${encodeURIComponent(chosenSlug)}`);
+      onSelectPlan(slug);
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -571,17 +616,14 @@ Chennai, Tamil Nadu
   };
 
   const handleShare = () => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://lifehutdevelopers.com';
-    const cleanUrl = activePlan
-      ? `${origin}/house-plans/${encodeURIComponent(activePlan.slug)}`
-      : `${origin}/house-plans`;
+    const url = window.location.href;
     if (navigator.share) {
       navigator.share({
         title: activePlan ? activePlan.title : "House Plans Collection | Lifehut Developers",
-        url: cleanUrl
+        url
       }).catch(() => {});
     } else {
-      navigator.clipboard.writeText(cleanUrl);
+      navigator.clipboard.writeText(url);
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2500);
     }
@@ -722,18 +764,6 @@ Chennai, Tamil Nadu
         {activePlan ? (
           <div className="space-y-8">
             
-            {/* Breadcrumb Navigation */}
-            <Breadcrumbs
-              items={[
-                { label: 'House Plans', onClick: () => handleSelectPlan(null) },
-                { label: activePlan.title, active: true }
-              ]}
-              onHomeClick={() => {
-                handleSelectPlan(null);
-                setActiveTab('home');
-              }}
-            />
-
             {/* Back Button */}
             <div>
               <button
@@ -2095,7 +2125,7 @@ Chennai, Tamil Nadu
         )}
       </AnimatePresence>
 
-      {/* ======================= DOWNLOAD CAD / PDF PHONEPE MODAL ======================= */}
+      {/* ======================= DOWNLOAD CAD / PDF RAZORPAY MODAL ======================= */}
       <AnimatePresence>
         {isPdfModalOpen && currentCadPlan && (
           <motion.div
@@ -2203,9 +2233,8 @@ Chennai, Tamil Nadu
                 <div>
                   <div className="mb-4">
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full font-mono border border-purple-100 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-purple-600 animate-pulse"></span>
-                        PhonePe Secure Checkout
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full font-mono">
+                        Instant Razorpay Checkout
                       </span>
                       <span className="text-[10px] text-slate-400 font-mono">
                         {currentCadPlan.planCode}
@@ -2278,7 +2307,7 @@ Chennai, Tamil Nadu
                   </div>
 
                   {/* Form */}
-                  <form onSubmit={handlePhonePePayment} className="space-y-3">
+                  <form onSubmit={handleRazorpayPayment} className="space-y-3">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-[11px] font-bold text-slate-700 mb-1">
@@ -2290,7 +2319,7 @@ Chennai, Tamil Nadu
                           value={clientName ?? ''}
                           onChange={(e) => setClientName(e.target.value)}
                           placeholder="e.g. Suresh V"
-                          className="w-full text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 focus:border-purple-600 outline-none"
+                          className="w-full text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 focus:border-blue-600 outline-none"
                         />
                       </div>
 
@@ -2304,7 +2333,7 @@ Chennai, Tamil Nadu
                           value={clientPhone ?? ''}
                           onChange={(e) => setClientPhone(e.target.value)}
                           placeholder="+91 98765 43210"
-                          className="w-full text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 focus:border-purple-600 outline-none"
+                          className="w-full text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 focus:border-blue-600 outline-none"
                         />
                       </div>
                     </div>
@@ -2318,7 +2347,7 @@ Chennai, Tamil Nadu
                         value={clientEmail ?? ''}
                         onChange={(e) => setClientEmail(e.target.value)}
                         placeholder="suresh@gmail.com"
-                        className="w-full text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 focus:border-purple-600 outline-none"
+                        className="w-full text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 focus:border-blue-600 outline-none"
                       />
                     </div>
 
@@ -2331,18 +2360,18 @@ Chennai, Tamil Nadu
 
                     <button
                       type="submit"
-                      disabled={phonepeLoading}
-                      className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white font-bold text-xs shadow-soft transition-all cursor-pointer flex items-center justify-center gap-2"
+                      disabled={razorpayLoading}
+                      className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-800 hover:to-indigo-800 text-white font-bold text-xs shadow-soft transition-all cursor-pointer flex items-center justify-center gap-2"
                     >
-                      {phonepeLoading ? (
+                      {razorpayLoading ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Connecting to PhonePe...</span>
+                          <span>Connecting to Razorpay...</span>
                         </>
                       ) : (
                         <>
                           <CreditCard className="w-4 h-4" />
-                          <span>Pay ₹{currentCadPlan.cadPackagePrice || 999} via PhonePe</span>
+                          <span>Pay ₹{currentCadPlan.cadPackagePrice || 999} via Razorpay</span>
                         </>
                       )}
                     </button>
@@ -2350,7 +2379,7 @@ Chennai, Tamil Nadu
                     <div className="flex items-center justify-center gap-3 pt-1 text-[10px] text-slate-400">
                       <span className="flex items-center gap-1">
                         <Lock className="w-3 h-3 text-slate-400" />
-                        PhonePe Verified 256-Bit SSL
+                        256-Bit SSL Encrypted
                       </span>
                       <span>•</span>
                       <span>UPI, Cards, NetBanking</span>
