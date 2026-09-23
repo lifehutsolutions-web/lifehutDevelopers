@@ -101,22 +101,9 @@ export const onRequestGet = async (context: { request: Request; env: Env }) => {
 
     if (planRes.ok) {
       const plans: any = await planRes.json().catch(() => []);
-      let plan = plans?.[0];
-      let cadUrl = plan?.cad_package_zip_url;
+      const plan = plans?.[0];
+      const cadUrl = plan?.cad_package_zip_url;
       const fileName = plan?.cad_package_file_name || `${planId}-Drawings.zip`;
-
-      // If this specific plan has no package attached yet, fetch the uploaded architectural drawing package
-      if (!cadUrl || !cadUrl.startsWith('data:')) {
-        const anyRes = await fetch(`${sbUrl}/rest/v1/house_plans?cad_package_zip_url=like.data%25&select=cad_package_zip_url&limit=1`, {
-          headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` }
-        });
-        if (anyRes.ok) {
-          const anyRows: any = await anyRes.json().catch(() => []);
-          if (anyRows?.[0]?.cad_package_zip_url) {
-            cadUrl = anyRows[0].cad_package_zip_url;
-          }
-        }
-      }
 
       if (cadUrl && cadUrl.startsWith('data:')) {
         const base64Data = cadUrl.replace(/^data:[^;]+;base64,/, '');

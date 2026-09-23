@@ -1443,14 +1443,10 @@ async function startServer() {
       }
 
       if (!zipUrl) {
-        // If specific package not attached, serve the uploaded real architectural drawings package
-        const defaultProduct = path.join(process.cwd(), 'uploads/cad-packages/LH-HP-0003.zip');
-        if (fs.existsSync(defaultProduct)) {
-          res.setHeader('Content-Type', 'application/zip');
-          res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
-          return fs.createReadStream(defaultProduct).pipe(res);
-        }
-        return res.status(404).json({ success: false, message: 'No uploaded drawing ZIP package found for this plan. Please upload the ZIP file in Admin Panel.' });
+        return res.status(404).json({
+          success: false,
+          message: `No drawing package has been uploaded yet for ${plan.title || plan.planCode}. Please upload the ZIP file in the Admin Panel.`
+        });
       }
 
       // 2. If stored as Base64 Data URI in cadPackageZipUrl (e.g. from Supabase)
@@ -1472,14 +1468,6 @@ async function startServer() {
           res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
           return fs.createReadStream(localDiskPath).pipe(res);
         }
-
-        // Check default product on disk
-        const defaultProduct = path.join(process.cwd(), 'uploads/cad-packages/LH-HP-0003.zip');
-        if (fs.existsSync(defaultProduct)) {
-          res.setHeader('Content-Type', 'application/zip');
-          res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
-          return fs.createReadStream(defaultProduct).pipe(res);
-        }
       }
 
       // 4. If an uploaded ZIP exists on an external URL or Supabase storage
@@ -1489,7 +1477,7 @@ async function startServer() {
 
       return res.status(404).json({
         success: false,
-        message: 'No uploaded drawing ZIP file found for this plan. Please upload it in the Admin Panel.'
+        message: `No drawing package file found for plan ${plan.planCode}. Please upload the ZIP file in the Admin Panel.`
       });
     } catch (err: any) {
       console.error('Error downloading attached CAD zip:', err);
