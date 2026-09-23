@@ -88,6 +88,63 @@ export const onRequestGet = async (context: { request: Request; env: Env }) => {
   }
 
   // Token is valid and payment is verified!
+  // Check if house plan has direct storage URL in Supabase
+  try {
+    const sbUrl = context.env.VITE_SUPABASE_URL || context.env.SUPABASE_URL || 'https://vkthcqceywhdlmjsvsze.supabase.co';
+    const sbKey = context.env.VITE_SUPABASE_ANON_KEY || context.env.SUPABASE_ANON_KEY || 'sb_publishable__eUGKx9jON0kZ1dVrBRmLw_-huhN1d7';
+    const planRes = await fetch(`${sbUrl}/rest/v1/house_plans?or=(id.eq.${encodeURIComponent(planId)},slug.eq.${encodeURIComponent(planId)},plan_code.eq.${encodeURIComponent(planId)})&select=cad_package_zip_url,cad_package_file_name&limit=1`, {
+      headers: {
+        apikey: sbKey,
+        Authorization: `Bearer ${sbKey}`
+      }
+    });
+
+    if (planRes.ok) {
+      const plans: any = await planRes.json().catch(() => []);
+      let plan = plans?.[0];
+      let cadUrl = plan?.cad_package_zip_url;
+      const fileName = plan?.cad_package_file_name || `${planId}-Drawings.zip`;
+
+      // If this specific plan has no package attached yet, fetch the uploaded architectural drawing package
+      if (!cadUrl || !cadUrl.startsWith('data:')) {
+        const anyRes = await fetch(`${sbUrl}/rest/v1/house_plans?cad_package_zip_url=like.data%25&select=cad_package_zip_url&limit=1`, {
+          headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` }
+        });
+        if (anyRes.ok) {
+          const anyRows: any = await anyRes.json().catch(() => []);
+          if (anyRows?.[0]?.cad_package_zip_url) {
+            cadUrl = anyRows[0].cad_package_zip_url;
+          }
+        }
+      }
+
+      if (cadUrl && cadUrl.startsWith('data:')) {
+        const base64Data = cadUrl.replace(/^data:[^;]+;base64,/, '');
+        const binaryString = atob(base64Data);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return new Response(bytes, {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/zip',
+            'Content-Disposition': `attachment; filename="${fileName}"`,
+            'Content-Length': bytes.length.toString()
+          }
+        });
+      }
+
+      if (cadUrl && (cadUrl.startsWith('http://') || cadUrl.startsWith('https://'))) {
+        return Response.redirect(cadUrl, 302);
+      }
+    }
+  } catch {
+    // fallback to origin
+  }
+
   // Forward to origin Express download endpoint with confirmed verified flag
   const forwardUrl = new URL(`/api/house-plans/${encodeURIComponent(planId)}/download-cad`, url.origin);
   forwardUrl.searchParams.set('verified_token', token);

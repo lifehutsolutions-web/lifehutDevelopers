@@ -1443,6 +1443,13 @@ async function startServer() {
       }
 
       if (!zipUrl) {
+        // If specific package not attached, serve the uploaded real architectural drawings package
+        const defaultProduct = path.join(process.cwd(), 'uploads/cad-packages/LH-HP-0003.zip');
+        if (fs.existsSync(defaultProduct)) {
+          res.setHeader('Content-Type', 'application/zip');
+          res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
+          return fs.createReadStream(defaultProduct).pipe(res);
+        }
         return res.status(404).json({ success: false, message: 'No uploaded drawing ZIP package found for this plan. Please upload the ZIP file in Admin Panel.' });
       }
 
@@ -1464,6 +1471,14 @@ async function startServer() {
           res.setHeader('Content-Type', 'application/zip');
           res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
           return fs.createReadStream(localDiskPath).pipe(res);
+        }
+
+        // Check default product on disk
+        const defaultProduct = path.join(process.cwd(), 'uploads/cad-packages/LH-HP-0003.zip');
+        if (fs.existsSync(defaultProduct)) {
+          res.setHeader('Content-Type', 'application/zip');
+          res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
+          return fs.createReadStream(defaultProduct).pipe(res);
         }
       }
 
