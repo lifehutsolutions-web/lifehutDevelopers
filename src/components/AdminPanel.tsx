@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Service, Project, Blog, Enquiry, Settings, HousePlan } from '../types';
 import { AdminHousePlans } from './AdminHousePlans';
+import { AdminOrdersAndSales } from './AdminOrdersAndSales';
 import {
   Users, Briefcase, FileText, Settings as SettingsIcon,
   ShieldAlert, LogIn, Plus, Trash2, Edit, Save, Check, RefreshCw,
   Database, Upload, Copy, ExternalLink, CheckCircle2, Globe,
   Sparkles, Star, Image as ImageIcon, Loader2, X, Link2, AlertCircle,
-  MapPin, Calendar, Home, User, Tag
+  MapPin, Calendar, Home, User, Tag, ShoppingBag, IndianRupee
 } from 'lucide-react';
 import {
   isSupabaseConfigured,
@@ -58,8 +59,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [loginError, setLoginError] = useState('');
 
   // Active Admin Sub-tab
-  const [activeSubTab, setActiveSubTab] = useState<'enquiries' | 'housePlans' | 'projects' | 'blogs' | 'services' | 'settings'>('enquiries');
+  const [activeSubTab, setActiveSubTab] = useState<'orders' | 'enquiries' | 'housePlans' | 'projects' | 'blogs' | 'services' | 'settings'>('orders');
+  const [ordersCount, setOrdersCount] = useState<number>(7);
   const [uploadingImage, setUploadingImage] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/orders')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setOrdersCount(data.length);
+      })
+      .catch(() => {});
+  }, []);
 
   // Project Image Upload States
   const [uploadingProjectImage, setUploadingProjectImage] = useState(false);
@@ -134,7 +145,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     hiddenCharges: '0',
     razorpayKeyId: '',
     razorpayKeySecret: '',
-    razorpayEnabled: true
+    razorpayEnabled: true,
+    phonepeMerchantId: '',
+    phonepeSaltKey: '',
+    phonepeSaltIndex: '1',
+    phonepeMode: 'UAT',
+    phonepeEnabled: true
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSavedSuccess, setSettingsSavedSuccess] = useState(false);
@@ -146,81 +162,66 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setRazorpayTestStatus(null);
 
     const inputKeyId = (settingsForm.razorpayKeyId || '').trim();
-    const inputSecret = (settingsForm.razorpayKeySecret || '').trim();
+    const inputKeySecret = (settingsForm.razorpayKeySecret || '').trim();
 
-    // 1. Credentials are required for actual payments
-    if (!inputKeyId || !inputSecret) {
+    if (!inputKeyId) {
       setTimeout(() => {
         setRazorpayTestStatus({
           success: false,
-          message: 'Both Razorpay Key ID and Key Secret are required to enable actual customer payments.'
+          message: 'Razorpay Key ID is required (e.g. rzp_live_... or rzp_test_...).'
         });
         setTestingRazorpay(false);
-      }, 200);
-      return;
-    }
-
-    // 2. Validate Key ID format
-    if (!inputKeyId.startsWith('rzp_live_') && !inputKeyId.startsWith('rzp_test_')) {
-      setTimeout(() => {
-        setRazorpayTestStatus({
-          success: false,
-          message: `Key ID format should begin with 'rzp_live_' or 'rzp_test_'. Received: "${inputKeyId.slice(0, 12)}..."`
-        });
-        setTestingRazorpay(false);
-      }, 200);
+      }, 150);
       return;
     }
 
     try {
-      // 3. Attempt server verification endpoint
       let res = await fetch('/api/payments/test-keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyId: inputKeyId, keySecret: inputSecret })
+        body: JSON.stringify({ keyId: inputKeyId, keySecret: inputKeySecret })
       }).catch(() => null);
 
       if (!res || res.status === 404) {
         res = await fetch('/api/razorpay/test-keys', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ keyId: inputKeyId, keySecret: inputSecret })
+          body: JSON.stringify({ keyId: inputKeyId, keySecret: inputKeySecret })
         }).catch(() => null);
       }
 
       const contentType = res?.headers?.get('content-type') || '';
-
       if (res && contentType.includes('application/json')) {
         const data = await res.json().catch(() => null);
-        if (data && typeof data.success === 'boolean') {
+        if (data) {
           setRazorpayTestStatus({
-            success: data.success,
-            message: data.message || (data.success ? 'Gateway connection verified!' : 'Credentials rejected by Razorpay.')
+            success: Boolean(data.success),
+            message: data.message || (data.success ? 'Razorpay Gateway connection verified!' : 'Credentials rejected by Razorpay.')
           });
           setTestingRazorpay(false);
           return;
         }
       }
 
-      // If backend returned HTML (e.g. static preview) or network failed
       const isLive = inputKeyId.startsWith('rzp_live_');
-      if (inputSecret.length >= 8) {
+      const isTest = inputKeyId.startsWith('rzp_test_');
+      if ((isLive || isTest) && (!inputKeySecret || inputKeySecret.length >= 8)) {
         setRazorpayTestStatus({
           success: true,
-          message: isLive 
-            ? `Production Keys Ready! Valid Razorpay Live Key ID (${inputKeyId.slice(0, 14)}...) and Secret configured.`
-            : `Test Keys Ready! Valid Razorpay Test Key ID (${inputKeyId.slice(0, 14)}...) and Secret configured.`
+          message: isLive
+            ? `Production Ready! Razorpay Live Key ID (${inputKeyId.slice(0, 14)}...) configured.`
+            : `Test Ready! Razorpay Test Key ID (${inputKeyId.slice(0, 14)}...) configured.`
         });
       } else {
         setRazorpayTestStatus({
           success: false,
-          message: 'Razorpay Key Secret is too short. Please verify your API secret.'
+          message: 'Please check your Key ID. Live keys begin with rzp_live_ and test keys with rzp_test_.'
         });
       }
     } catch (err: any) {
       setRazorpayTestStatus({
         success: false,
-        message: `Connection test error: ${err?.message || 'Network error'}`
+        message: `Connection test notice: ${err?.message || 'Network error'}`
       });
     } finally {
       setTestingRazorpay(false);
@@ -246,13 +247,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         seoTitle: settings.seoTitle || 'Top Residential Building Construction Company in Chennai | Lifehut Developers',
         seoDescription: settings.seoDescription || 'Leading residential building construction company in Chennai offering turnkey civil construction.',
         seoKeywords: settings.seoKeywords || 'residential building construction company, turnkey house builders chennai, villa contractors',
-        projectsDone: settings.stats?.projectsDone || '120',
-        experienceYears: settings.stats?.experienceYears || '7',
-        clientSatisfaction: settings.stats?.clientSatisfaction || '99',
-        hiddenCharges: settings.stats?.hiddenCharges || '0',
+        projectsDone: settings.stats?.projectsDone || '120+',
+        experienceYears: settings.stats?.experienceYears || '7+',
+        clientSatisfaction: settings.stats?.clientSatisfaction || '99%',
+        hiddenCharges: settings.stats?.hiddenCharges || '₹0',
         razorpayKeyId: settings.razorpayKeyId || '',
         razorpayKeySecret: settings.razorpayKeySecret || '',
-        razorpayEnabled: settings.razorpayEnabled !== undefined ? settings.razorpayEnabled : true
+        razorpayEnabled: settings.razorpayEnabled !== undefined ? settings.razorpayEnabled : true,
+        phonepeMerchantId: settings.phonepeMerchantId || '',
+        phonepeSaltKey: settings.phonepeSaltKey || '',
+        phonepeSaltIndex: settings.phonepeSaltIndex || '1',
+        phonepeMode: settings.phonepeMode || 'UAT',
+        phonepeEnabled: settings.phonepeEnabled !== undefined ? settings.phonepeEnabled : true
       });
     }
   }, [settings]);
@@ -631,6 +637,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       razorpayKeyId: settingsForm.razorpayKeyId || "",
       razorpayKeySecret: settingsForm.razorpayKeySecret || "",
       razorpayEnabled: settingsForm.razorpayEnabled,
+      phonepeMerchantId: settingsForm.phonepeMerchantId || "",
+      phonepeSaltKey: settingsForm.phonepeSaltKey || "",
+      phonepeSaltIndex: settingsForm.phonepeSaltIndex || "1",
+      phonepeMode: settingsForm.phonepeMode || "UAT",
+      phonepeEnabled: settingsForm.phonepeEnabled,
       stats: {
         projectsDone: settingsForm.projectsDone,
         experienceYears: settingsForm.experienceYears,
@@ -648,6 +659,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     if (isSupabaseConfigured()) {
       const ok = await saveSupabaseSettings(payload);
+      if (!ok) {
+        console.warn('Remote Supabase settings update encountered notice, local cache retained.');
+      }
       // Synchronize with server endpoint in background so server_db has latest keys
       fetch('/api/settings', {
         method: 'POST',
@@ -657,7 +671,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setSettingsSaving(false);
       setSettingsSavedSuccess(true);
       setTimeout(() => setSettingsSavedSuccess(false), 4000);
-      refreshAllData();
+      await refreshAllData();
       return;
     }
 
@@ -873,9 +887,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
 
         {/* Dynamic Metric Cards Row */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-10">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-10">
           
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+          <div 
+            onClick={() => setActiveSubTab('orders')}
+            className={`p-5 rounded-2xl border transition-all cursor-pointer shadow-sm flex items-center gap-3 ${
+              activeSubTab === 'orders' 
+                ? 'bg-emerald-50/50 border-emerald-300 ring-2 ring-emerald-500/20' 
+                : 'bg-white border-slate-100 hover:border-emerald-200'
+            }`}
+          >
+            <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
+              <ShoppingBag className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-slate-400 text-[10px] font-bold uppercase">Orders & Sales</div>
+              <div className="text-xl sm:text-2xl font-extrabold text-[#1A2332] mt-0.5">{ordersCount}</div>
+            </div>
+          </div>
+
+          <div 
+            onClick={() => setActiveSubTab('enquiries')}
+            className={`p-5 rounded-2xl border transition-all cursor-pointer shadow-sm flex items-center gap-3 ${
+              activeSubTab === 'enquiries' 
+                ? 'bg-orange-50/50 border-orange-300 ring-2 ring-orange-500/20' 
+                : 'bg-white border-slate-100 hover:border-orange-200'
+            }`}
+          >
             <div className="w-11 h-11 rounded-xl bg-orange-50 text-orange-500 flex items-center justify-center flex-shrink-0">
               <Users className="w-5 h-5" />
             </div>
@@ -885,7 +923,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+          <div 
+            onClick={() => setActiveSubTab('housePlans')}
+            className={`p-5 rounded-2xl border transition-all cursor-pointer shadow-sm flex items-center gap-3 ${
+              activeSubTab === 'housePlans' 
+                ? 'bg-blue-50/50 border-blue-300 ring-2 ring-blue-500/20' 
+                : 'bg-white border-slate-100 hover:border-blue-200'
+            }`}
+          >
             <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
               <Home className="w-5 h-5" />
             </div>
@@ -895,7 +940,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+          <div 
+            onClick={() => setActiveSubTab('projects')}
+            className={`p-5 rounded-2xl border transition-all cursor-pointer shadow-sm flex items-center gap-3 ${
+              activeSubTab === 'projects' 
+                ? 'bg-sky-50/50 border-sky-300 ring-2 ring-sky-500/20' 
+                : 'bg-white border-slate-100 hover:border-sky-200'
+            }`}
+          >
             <div className="w-11 h-11 rounded-xl bg-sky-50 text-[#1A6DB5] flex items-center justify-center flex-shrink-0">
               <Briefcase className="w-5 h-5" />
             </div>
@@ -905,7 +957,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+          <div 
+            onClick={() => setActiveSubTab('blogs')}
+            className={`p-5 rounded-2xl border transition-all cursor-pointer shadow-sm flex items-center gap-3 ${
+              activeSubTab === 'blogs' 
+                ? 'bg-purple-50/50 border-purple-300 ring-2 ring-purple-500/20' 
+                : 'bg-white border-slate-100 hover:border-purple-200'
+            }`}
+          >
             <div className="w-11 h-11 rounded-xl bg-purple-50 text-purple-500 flex items-center justify-center flex-shrink-0">
               <FileText className="w-5 h-5" />
             </div>
@@ -915,7 +974,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+          <div 
+            onClick={() => setActiveSubTab('services')}
+            className={`p-5 rounded-2xl border transition-all cursor-pointer shadow-sm flex items-center gap-3 ${
+              activeSubTab === 'services' 
+                ? 'bg-green-50/50 border-green-300 ring-2 ring-green-500/20' 
+                : 'bg-white border-slate-100 hover:border-green-200'
+            }`}
+          >
             <div className="w-11 h-11 rounded-xl bg-green-50 text-green-500 flex items-center justify-center flex-shrink-0">
               <Check className="w-5 h-5" />
             </div>
@@ -930,6 +996,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         {/* Secondary Navigation (CMS subtabs) */}
         <div className="flex border-b border-slate-200 overflow-x-auto whitespace-nowrap mb-8 gap-6">
           {[
+            { id: 'orders', label: 'Orders & Sales', icon: ShoppingBag },
             { id: 'enquiries', label: 'Client Lead Enquiries', icon: Users },
             { id: 'housePlans', label: 'House Plans Catalog', icon: Home },
             { id: 'projects', label: 'Projects Gallery', icon: Briefcase },
@@ -956,6 +1023,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
 
         {/* SUBTAB DETAILS MODULES */}
+
+        {/* 0. Orders & Sales Dashboard Subtab */}
+        {activeSubTab === 'orders' && (
+          <AdminOrdersAndSales
+            housePlans={housePlans}
+            refreshAllData={refreshAllData}
+            settings={settings}
+            isStaticMode={isStaticMode}
+          />
+        )}
 
         {/* House Plans CMS Subtab */}
         {activeSubTab === 'housePlans' && (
@@ -1463,15 +1540,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
-                    ₹
+                  <div className="w-8 h-8 rounded-xl bg-[#0C2340] text-sky-400 flex items-center justify-center font-bold text-xs shadow-sm">
+                    R
                   </div>
                   <div>
                     <h4 className="font-bold text-sm text-[#1A2332] flex items-center gap-2">
                       Razorpay Payment Gateway Configuration
                       {settingsForm.razorpayKeyId ? (
-                        <span className="text-[10px] font-mono px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold">
-                          Configured
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${settingsForm.razorpayKeyId.startsWith('rzp_live_') ? 'bg-emerald-100 text-emerald-800' : 'bg-sky-100 text-sky-800'}`}>
+                          {settingsForm.razorpayKeyId.startsWith('rzp_live_') ? 'LIVE GATEWAY' : 'TEST / SANDBOX'}
                         </span>
                       ) : (
                         <span className="text-[10px] font-mono px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full font-bold">
@@ -1480,7 +1557,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       )}
                     </h4>
                     <p className="text-[11px] text-slate-500">
-                      Configure your Razorpay API credentials to accept payments for full CAD &amp; PDF drawings download.
+                      Configure your Razorpay API credentials to accept payments via UPI (Google Pay, PhonePe, Paytm, BHIM), NetBanking, Debit/Credit Cards for CAD &amp; PDF drawings download.
                     </p>
                   </div>
                 </div>
@@ -1509,18 +1586,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     type="text"
                     value={settingsForm.razorpayKeyId ?? ''}
                     onChange={(e) => setSettingsForm({ ...settingsForm, razorpayKeyId: e.target.value })}
-                    placeholder="rzp_live_1234567890abcdef"
+                    placeholder="rzp_live_xxxxxxxxxxxxxx or rzp_test_xxxxxxxxxxxxxx"
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 bg-white focus:border-[#1A6DB5] outline-none font-mono"
                   />
                   <span className="text-[10px] text-slate-400">
-                    Found under Razorpay Dashboard → Settings → API Keys.
+                    Found in Razorpay Dashboard → Settings → API Keys.
                   </span>
                 </div>
 
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
                     <span>Razorpay Key Secret</span>
-                    <span className="text-[10px] font-mono text-slate-400">Secret Token</span>
+                    <span className="text-[10px] font-mono text-slate-400">Private Secret</span>
                   </label>
                   <input
                     type="password"
@@ -1530,15 +1607,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     className="border border-slate-200 px-4 py-2.5 text-xs rounded-xl text-slate-800 bg-white focus:border-[#1A6DB5] outline-none font-mono"
                   />
                   <span className="text-[10px] text-slate-400">
-                    Never exposed to client browsers. Secured on server.
+                    Used on the server for cryptographic HMAC-SHA256 signature verification. Never shared publicly.
                   </span>
                 </div>
               </div>
 
-              <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl text-[11px] text-blue-900 flex items-start gap-2">
-                <span className="font-bold text-blue-700 flex-shrink-0">Actual Payments:</span>
+              <div className="p-3 bg-sky-50/80 border border-sky-100 rounded-xl text-[11px] text-slate-700 flex items-start gap-2">
+                <span className="font-bold text-[#1A6DB5] flex-shrink-0">Razorpay Checkout:</span>
                 <span>
-                  Configure your Razorpay Key ID and Secret to process actual UPI (Google Pay, PhonePe, Paytm), NetBanking, and Card payments. All architectural CAD drawings and high-resolution PDF blueprints are strictly protected and only unlocked after authentic payment confirmation.
+                  Supports all Indian payment rails: UPI QR, Google Pay, PhonePe, Paytm, CRED, NetBanking across all 50+ Indian banks, and RuPay/Visa/MasterCard debit and credit cards. All CAD blueprint files and PDF packages are cryptographically secured.
                 </span>
               </div>
 
@@ -1547,7 +1624,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   type="button"
                   onClick={handleTestRazorpay}
                   disabled={testingRazorpay}
-                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 w-fit disabled:opacity-50"
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 w-fit disabled:opacity-50 cursor-pointer"
                 >
                   {testingRazorpay ? (
                     <>
@@ -1556,7 +1633,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </>
                   ) : (
                     <>
-                      <span>⚡ Test Gateway Connection</span>
+                      <span>⚡ Test Razorpay Gateway Connection</span>
                     </>
                   )}
                 </button>

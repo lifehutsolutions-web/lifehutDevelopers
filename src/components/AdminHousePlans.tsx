@@ -170,6 +170,7 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
   const [formCadPackageZipUrl, setFormCadPackageZipUrl] = useState('');
   const [formCadPackageFileName, setFormCadPackageFileName] = useState('');
   const [formCadPackageSize, setFormCadPackageSize] = useState('');
+  const [formCadPackageBase64, setFormCadPackageBase64] = useState('');
   const [formCadPackagePrice, setFormCadPackagePrice] = useState<number>(999);
   const [formCadPackageIncludesText, setFormCadPackageIncludesText] = useState('');
   const [uploadingZip, setUploadingZip] = useState(false);
@@ -192,6 +193,7 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
       });
 
       const fileBase64 = await base64Promise;
+      setFormCadPackageBase64(fileBase64);
 
       // 1. Try Express server upload endpoint
       try {
@@ -338,6 +340,7 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
     setFormCadPackageZipUrl('');
     setFormCadPackageFileName('');
     setFormCadPackageSize('');
+    setFormCadPackageBase64('');
     setFormCadPackagePrice(999);
     setFormCadPackageIncludesText("AutoCAD 2018+ DWG Architectural Floor Plan\nHigh-Resolution PDF Blueprints & Working Drawings\nStructural RCC Column & Beam Reinforcement Schedule\n100% Vastu Shastra Room Dimension Grid\nIS 456:2000 Civil Foundation Specifications\n10-Year Structural Frame Warranty Certificate");
     setZipUploadError(null);
@@ -386,6 +389,7 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
     setFormCadPackageZipUrl(plan.cadPackageZipUrl || '');
     setFormCadPackageFileName(plan.cadPackageFileName || '');
     setFormCadPackageSize(plan.cadPackageSize || '');
+    setFormCadPackageBase64(plan.cadPackageBase64 || '');
     setFormCadPackagePrice(plan.cadPackagePrice !== undefined ? plan.cadPackagePrice : 999);
     setFormCadPackageIncludesText(
       (plan.cadPackageIncludes && plan.cadPackageIncludes.length > 0
@@ -489,6 +493,7 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
       cadPackageSize: formCadPackageSize || '',
       cadPackagePrice: Number(formCadPackagePrice) || 999,
       cadPackageIncludes: cadIncludesArray.length > 0 ? cadIncludesArray : undefined,
+      cadPackageBase64: formCadPackageBase64 || undefined,
       seoMeta: {
         title: formSeoTitle || `${formTitle} | Lifehut Developers`,
         description: formSeoDescription || formDescription.slice(0, 160),
@@ -632,17 +637,17 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
                   {plan.cadPackageZipUrl ? (
                     <>
                       <span>•</span>
-                      <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold flex items-center gap-1">
+                      <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-mono text-[10px] font-semibold flex items-center gap-1 border border-emerald-200">
                         <Archive className="w-3 h-3 text-emerald-600" />
-                        ZIP Attached {plan.cadPackageSize ? `(${plan.cadPackageSize})` : ''}
+                        Custom ZIP Attached {plan.cadPackageSize ? `(${plan.cadPackageSize})` : ''}
                       </span>
                     </>
                   ) : (
                     <>
                       <span>•</span>
-                      <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold flex items-center gap-1">
+                      <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded font-mono text-[10px] font-semibold flex items-center gap-1 border border-amber-200">
                         <FileCode className="w-3 h-3 text-amber-600" />
-                        Auto-Gen CAD (₹{plan.cadPackagePrice || 999})
+                        No ZIP Attached Yet (₹{plan.cadPackagePrice || 999})
                       </span>
                     </>
                   )}
@@ -1563,9 +1568,10 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
                             setFormCadPackageZipUrl('');
                             setFormCadPackageFileName('');
                             setFormCadPackageSize('');
+                            setFormCadPackageBase64('');
                           }}
                           className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg cursor-pointer"
-                          title="Remove custom ZIP (will fallback to auto-generated architectural ZIP)"
+                          title="Remove attached drawing package"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1585,8 +1591,8 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
                       <span className="text-[10px] text-slate-400">
                         Supports .ZIP, .RAR, .7Z, or AutoCAD .DWG (up to 50MB)
                       </span>
-                      <span className="text-[10px] text-blue-700 font-semibold bg-blue-50 px-2 py-0.5 rounded-full mt-1">
-                        If left blank, our system will auto-generate an architectural DWG/PDF bundle upon payment.
+                      <span className="text-[10px] text-emerald-800 font-semibold bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full mt-1">
+                        ✓ Your uploaded ZIP archive will be downloaded directly by customers upon verified payment.
                       </span>
                     </div>
                   )}

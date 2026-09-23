@@ -143,9 +143,34 @@ export interface HousePlan {
     description: string;
     keywords: string;
   };
+  views?: number;
+  purchaseCount?: number;
   isFeatured?: boolean;
   isActive?: boolean;
   createdAt?: string;
+}
+
+export interface HousePlanOrder {
+  id: string;
+  orderId?: string;
+  transactionId?: string;
+  planId: string;
+  planCode: string;
+  planTitle: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string;
+  amount: number;
+  currency?: string;
+  paymentMethod: 'Razorpay' | 'PhonePe' | 'Manual' | 'Free Claim' | 'UPI / Direct' | string;
+  paymentStatus: 'Completed' | 'Pending' | 'Failed';
+  deliveryStatus?: 'Delivered' | 'Pending Dispatch' | 'Follow-up Needed' | string;
+  downloadToken?: string;
+  downloadUrl?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  createdAt: string;
+  notes?: string;
 }
 
 export interface SiteSettings {
@@ -170,6 +195,12 @@ export interface SiteSettings {
   razorpayKeyId?: string;
   razorpayKeySecret?: string;
   razorpayEnabled?: boolean;
+  // Backward compatibility / optional
+  phonepeMerchantId?: string;
+  phonepeSaltKey?: string;
+  phonepeSaltIndex?: string;
+  phonepeMode?: string;
+  phonepeEnabled?: boolean;
 }
 
 export interface CMSData {
@@ -182,6 +213,7 @@ export interface CMSData {
   enquiries: Enquiry[];
   quotes: QuoteRequest[];
   settings: SiteSettings;
+  orders?: HousePlanOrder[];
 }
 
 export type Settings = SiteSettings;
