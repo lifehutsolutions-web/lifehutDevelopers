@@ -3,37 +3,27 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
-import { CMSData, Service, Project, Blog, Testimonial, Enquiry, QuoteRequest, SiteSettings, Stats, HousePlan } from './src/types';
+import { CMSData, Service, Project, Blog, Testimonial, Enquiry, QuoteRequest, SiteSettings, Stats, HousePlan, HousePlanOrder } from './src/types';
 import { defaultHousePlans } from './src/data/defaultHousePlans';
 
 const PORT = 3000;
 const DB_FILE = path.join(process.cwd(), 'server_db.json');
 
 // Initialize with Premium Defaults
-const defaultStats: Stats = {
-  projectsDone: "120+",
-  experienceYears: "7+",
-  clientSatisfaction: "99%",
-  hiddenCharges: "₹0"
-};
-
 const defaultSettings: SiteSettings = {
-  heroTitle: "Residential Building Construction Company in Chennai",
-  heroSubtitle: "Custom Luxury Villa Builders & Turnkey Residential House Contractors with Civil Engineering Precision.",
+  heroTitle: "We Build Your Dream",
+  heroSubtitle: "Luxury Villa Construction with Engineering Precision.",
   heroBannerImage: "/src/assets/images/hero_villa_1784191464588.jpg",
-  address: "Ground Floor, No. 4, Thirualluvar Nagar 1st Street, Keelkattalai, Chennai, Tamil Nadu 600117",
+  address: "No.16, 1st Street, Nehru Nagar, Ambattur, Chennai – 600053",
   phone: "+91 80721 63330",
   email: "lifehutdevelopers@gmail.com",
   hours: "Mon – Sat: 9:00 AM – 6:00 PM",
   whatsappNumber: "918072163330",
-  facebookUrl: "https://facebook.com/lifehutdevelopers",
-  instagramUrl: "https://www.instagram.com/lifehut_developers/",
-  pinterestUrl: "https://in.pinterest.com/lifehutdevelopers/",
-  youtubeUrl: "https://www.youtube.com/@lifehutdevelopers",
-  seoTitle: "Top Residential Building Construction Company in Chennai | Lifehut Developers",
-  seoDescription: "Leading residential building construction company in Chennai.",
-  seoKeywords: "residential building construction company, turnkey house builders chennai",
-  stats: defaultStats
+  instagramUrl: "https://www.instagram.com/lifehutdevelopers/",
+  pinterestUrl: "https://in.pinterest.com/lifehutdevelopers",
+  seoTitle: "Lifehut Developers | Luxury Residential Construction in Chennai",
+  seoDescription: "Award-winning luxury residential builder in Chennai. Turnkey home construction, luxury villa execution, and premium engineering consultations since 2019.",
+  seoKeywords: "luxury construction, villa builders chennai, turnkey residential construction, custom home building, Lifehut developers chennai"
 };
 
 const defaultServices: Service[] = [
@@ -334,6 +324,13 @@ const defaultTestimonials: Testimonial[] = [
   }
 ];
 
+const defaultStats: Stats = {
+  projectsDone: "120+",
+  experienceYears: "7+",
+  clientSatisfaction: "99%",
+  hiddenCharges: "₹0"
+};
+
 // Initial Database State
 const initialCMSData: CMSData = {
   services: defaultServices,
@@ -458,15 +455,7 @@ async function startServer() {
 
   app.get('/api/settings', (req, res) => {
     const db = readDB();
-    const s: SiteSettings = db.settings || defaultSettings;
-    const stats: Stats = {
-      projectsDone: s.stats?.projectsDone || "120+",
-      experienceYears: s.stats?.experienceYears || "7+",
-      clientSatisfaction: s.stats?.clientSatisfaction || "99%",
-      hiddenCharges: s.stats?.hiddenCharges || "₹0",
-      ...(s.stats || {})
-    };
-    res.json({ ...s, stats });
+    res.json(db.settings || {});
   });
 
   // Submit Contact Enquiry
@@ -566,28 +555,19 @@ async function startServer() {
   });
 
   // Update Settings (Supports both POST /api/cms/settings and POST /api/settings)
-  const handleSettingsUpdate = (req: express.Request, res: express.Response) => {
+  app.post('/api/cms/settings', (req, res) => {
     const db = readDB();
-    const existingSettings: SiteSettings = db.settings || defaultSettings;
-    const mergedStats: Stats = {
-      projectsDone: "120+",
-      experienceYears: "7+",
-      clientSatisfaction: "99%",
-      hiddenCharges: "₹0",
-      ...(existingSettings.stats || {}),
-      ...(req.body.stats || {})
-    };
-    db.settings = {
-      ...existingSettings,
-      ...req.body,
-      stats: mergedStats
-    };
+    db.settings = { ...db.settings, ...req.body };
     writeDB(db);
     res.json({ success: true, message: 'Site Settings saved successfully.' });
-  };
+  });
 
-  app.post('/api/cms/settings', handleSettingsUpdate);
-  app.post('/api/settings', handleSettingsUpdate);
+  app.post('/api/settings', (req, res) => {
+    const db = readDB();
+    db.settings = { ...db.settings, ...req.body };
+    writeDB(db);
+    res.json({ success: true, message: 'Site Settings saved successfully.' });
+  });
 
   // Service CRUD
   app.post('/api/services', (req, res) => {
@@ -869,19 +849,41 @@ async function startServer() {
 
       if (planId) {
         const db = readDB();
-        const planIdx = db.housePlans?.findIndex(p => p.id === planId);
+        const planIdx = db.housePlans?.findIndex(p => p.id === planId || p.planCode === planId || p.slug === planId);
         if (planIdx !== undefined && planIdx >= 0 && db.housePlans) {
-          db.housePlans[planIdx].cadPackageZipUrl = publicUrl;
+          db.housePlans[planIdx].cadPackageZipUrl = fileBase64;
           db.housePlans[planIdx].cadPackageFileName = fileName;
           db.housePlans[planIdx].cadPackageSize = sizeMb;
           db.housePlans[planIdx].cadPackageBase64 = fileBase64;
           writeDB(db);
         }
+
+        // Also update Supabase house_plans table directly
+        try {
+          const sbUrl = process.env.VITE_SUPABASE_URL || 'https://vkthcqceywhdlmjsvsze.supabase.co';
+          const sbKey = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable__eUGKx9jON0kZ1dVrBRmLw_-huhN1d7';
+          fetch(`${sbUrl}/rest/v1/house_plans?or=(id.eq.${encodeURIComponent(planId)},slug.eq.${encodeURIComponent(planId)},plan_code.eq.${encodeURIComponent(planId)})`, {
+            method: 'PATCH',
+            headers: {
+              apikey: sbKey,
+              Authorization: `Bearer ${sbKey}`,
+              'Content-Type': 'application/json',
+              Prefer: 'return=minimal'
+            },
+            body: JSON.stringify({
+              cad_package_zip_url: fileBase64,
+              cad_package_file_name: fileName,
+              cad_package_size: sizeMb,
+              updated_at: new Date().toISOString()
+            })
+          }).catch(e => console.warn('Supabase zip patch err:', e));
+        } catch {}
       }
 
       return res.json({
         success: true,
         url: publicUrl,
+        base64: fileBase64,
         fileName: fileName,
         size: sizeMb
       });
@@ -891,18 +893,16 @@ async function startServer() {
     }
   });
 
-  // --- PHONEPE PAYMENT GATEWAY CONFIG & CHECKOUT ENDPOINTS ---
-  // Resolves active PhonePe credentials across override params, environment variables, server_db.json, and Supabase
-  async function getActivePhonePeConfig(overrideMerchantId?: string, overrideSaltKey?: string, overrideSaltIndex?: string, overrideMode?: string) {
+  // --- RAZORPAY PAYMENT CONFIG & CHECKOUT ENDPOINTS ---
+  // Helper to resolve the active Razorpay credentials across environment variables, server_db.json, and Supabase
+  async function getActiveRazorpayConfig() {
     const db = readDB();
-    let merchantId = (overrideMerchantId || process.env.PHONEPE_MERCHANT_ID || db.settings?.phonepeMerchantId || (db.settings?.stats as any)?.phonepeMerchantId || '').trim();
-    let saltKey = (overrideSaltKey || process.env.PHONEPE_SALT_KEY || db.settings?.phonepeSaltKey || (db.settings?.stats as any)?.phonepeSaltKey || '').trim();
-    let saltIndex = (overrideSaltIndex || process.env.PHONEPE_SALT_INDEX || db.settings?.phonepeSaltIndex || (db.settings?.stats as any)?.phonepeSaltIndex || '1').trim();
-    let mode = (overrideMode || process.env.PHONEPE_MODE || db.settings?.phonepeMode || (db.settings?.stats as any)?.phonepeMode || 'UAT').trim().toUpperCase();
-    let enabled = db.settings?.phonepeEnabled !== undefined ? db.settings.phonepeEnabled : (db.settings?.stats as any)?.phonepeEnabled ?? true;
+    let keyId = process.env.RAZORPAY_KEY_ID || db.settings?.razorpayKeyId || (db.settings?.stats as any)?.razorpayKeyId || '';
+    let keySecret = process.env.RAZORPAY_KEY_SECRET || db.settings?.razorpayKeySecret || (db.settings?.stats as any)?.razorpayKeySecret || '';
+    let enabled = db.settings?.razorpayEnabled !== undefined ? db.settings.razorpayEnabled : (db.settings?.stats as any)?.razorpayEnabled ?? true;
 
     // If keys not found in local db or env, check Supabase
-    if (!merchantId || !saltKey) {
+    if (!keyId || !keySecret) {
       try {
         const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://vkthcqceywhdlmjsvsze.supabase.co';
         const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable__eUGKx9jON0kZ1dVrBRmLw_-huhN1d7';
@@ -916,52 +916,54 @@ async function startServer() {
           const data = (await response.json()) as any;
           const stats = data[0]?.stats;
           if (stats) {
-            if (!merchantId && stats.phonepeMerchantId) merchantId = String(stats.phonepeMerchantId).trim();
-            if (!saltKey && stats.phonepeSaltKey) saltKey = String(stats.phonepeSaltKey).trim();
-            if (stats.phonepeSaltIndex) saltIndex = String(stats.phonepeSaltIndex).trim();
-            if (stats.phonepeMode) mode = String(stats.phonepeMode).trim().toUpperCase();
-            if (stats.phonepeEnabled !== undefined) enabled = stats.phonepeEnabled;
+            if (!keyId && stats.razorpayKeyId) keyId = stats.razorpayKeyId;
+            if (!keySecret && stats.razorpayKeySecret) keySecret = stats.razorpayKeySecret;
+            if (stats.razorpayEnabled !== undefined) enabled = stats.razorpayEnabled;
           }
         }
       } catch (sbErr) {
-        console.warn('Could not query Supabase settings for PhonePe credentials:', sbErr);
+        console.warn('Could not query Supabase settings for Razorpay credentials:', sbErr);
       }
     }
 
-    const isConfigured = Boolean(merchantId && saltKey && merchantId !== 'PGTESTPAYUAT');
-    let effectiveMerchantId = merchantId || 'PGTESTPAYUAT86';
-    if (effectiveMerchantId === 'PGTESTPAYUAT') {
-      effectiveMerchantId = 'PGTESTPAYUAT86';
-    }
-    let effectiveSaltKey = saltKey || '96434309-7796-489d-8924-ab56988a6076';
-    if (effectiveSaltKey === '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399') {
-      effectiveSaltKey = '96434309-7796-489d-8924-ab56988a6076';
-    }
+    // Determine if keys are real live/test keys vs placeholder/demo
+    const isPlaceholder = !keyId ||
+      keyId === 'rzp_test_demo_lifehut' ||
+      keyId === 'rzp_test_lifehut_demo' ||
+      keySecret === 'demo_secret_12345' ||
+      keyId.includes('placeholder') ||
+      keySecret.length < 8;
+
+    const isRealRazorpay = Boolean(
+      keyId &&
+      keySecret &&
+      keyId.startsWith('rzp_') &&
+      !isPlaceholder
+    );
 
     return {
-      merchantId: effectiveMerchantId,
-      saltKey: effectiveSaltKey,
-      saltIndex: saltIndex || '1',
-      mode: mode === 'PRODUCTION' ? 'PRODUCTION' : 'UAT',
+      keyId: keyId || 'rzp_test_demo_lifehut',
+      keySecret: keySecret || '',
       enabled,
-      isConfigured
+      isConfigured: Boolean(keyId && keySecret && !isPlaceholder),
+      isRealRazorpay,
+      testMode: !isRealRazorpay
     };
   }
 
-  app.get('/api/phonepe/config', async (req, res) => {
+  app.get('/api/razorpay/config', async (req, res) => {
     try {
-      const config = await getActivePhonePeConfig();
+      const config = await getActiveRazorpayConfig();
       res.json({
-        merchantId: config.merchantId,
+        keyId: config.keyId,
         isConfigured: config.isConfigured,
-        mode: config.mode,
-        saltIndex: config.saltIndex,
+        testMode: config.testMode,
         enabled: config.enabled,
         currency: 'INR'
       });
     } catch (err: any) {
-      console.error('Error fetching PhonePe config:', err);
-      res.status(500).json({ success: false, message: 'Failed to retrieve PhonePe configuration.' });
+      console.error('Error fetching Razorpay config:', err);
+      res.status(500).json({ success: false, message: 'Failed to retrieve payment configuration.' });
     }
   });
 
@@ -969,71 +971,79 @@ async function startServer() {
     res.json({ status: 'ok', service: 'Lifehut Developers API', time: new Date().toISOString() });
   });
 
-  const handleTestPhonePe = async (req: express.Request, res: express.Response) => {
+  const handleTestKeysEndpoint = async (req: express.Request, res: express.Response) => {
     try {
-      const config = await getActivePhonePeConfig();
-      const merchantId = (req.body?.merchantId || config.merchantId || '').trim();
-      const saltKey = (req.body?.saltKey || config.saltKey || '').trim();
-      const saltIndex = (req.body?.saltIndex || config.saltIndex || '1').trim();
-      const mode = (req.body?.mode || config.mode || 'UAT').trim().toUpperCase();
+      const config = await getActiveRazorpayConfig();
+      const keyId = (req.body?.keyId !== undefined ? req.body.keyId : config.keyId || '').trim();
+      const keySecret = (req.body?.keySecret !== undefined ? req.body.keySecret : config.keySecret || '').trim();
 
-      if (!merchantId || !saltKey) {
+      if (!keyId) {
         return res.status(400).json({
           success: false,
-          message: 'PhonePe Merchant ID and Salt Key are required.'
+          status: 'missing_key',
+          message: 'Razorpay Key ID is required to process actual payments.'
         });
       }
 
-      const isProduction = mode === 'PRODUCTION';
-      const apiHost = isProduction
-        ? 'https://api.phonepe.com/apis/hermes'
-        : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
+      if (!keyId.startsWith('rzp_live_') && !keyId.startsWith('rzp_test_')) {
+        return res.status(400).json({
+          success: false,
+          status: 'invalid_format',
+          message: `Key ID format should start with 'rzp_live_' or 'rzp_test_'. Provided: ${keyId.slice(0, 10)}...`
+        });
+      }
 
-      const testTxnId = `PING_${Date.now()}`;
-      const statusPath = `/pg/v1/status/${merchantId}/${testTxnId}`;
-      const sha256 = crypto.createHash('sha256').update(statusPath + saltKey).digest('hex');
-      const xVerify = `${sha256}###${saltIndex}`;
+      if (!keySecret) {
+        return res.status(400).json({
+          success: false,
+          status: 'missing_secret',
+          message: 'Razorpay Key Secret is required alongside Key ID.'
+        });
+      }
 
+      // Test credentials against Razorpay Orders API
       try {
-        const probeRes = await fetch(`${apiHost}${statusPath}`, {
+        const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+        const testRes = await fetch('https://api.razorpay.com/v1/orders?count=1', {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-VERIFY': xVerify,
-            'X-MERCHANT-ID': merchantId
-          }
+          headers: { 'Authorization': authHeader }
         });
 
-        const probeData: any = await probeRes.json().catch(() => ({}));
-        if (probeData?.code === 'KEY_NOT_CONFIGURED' || probeData?.code === 'UNAUTHORIZED' || probeData?.message?.toLowerCase().includes('checksum')) {
+        if (testRes.ok) {
+          const isLive = keyId.startsWith('rzp_live_');
+          return res.json({
+            success: true,
+            status: isLive ? 'live_verified' : 'test_verified',
+            isLive,
+            keyId,
+            message: isLive
+              ? 'Live Gateway Verified! Active Razorpay Production API keys confirmed.'
+              : 'Test Gateway Verified! Active Razorpay Test API keys confirmed.'
+          });
+        } else {
+          const errData: any = await testRes.json().catch(() => ({}));
+          const desc = errData?.error?.description || `Authentication failed (HTTP ${testRes.status})`;
           return res.status(400).json({
             success: false,
-            message: `PhonePe Authentication Failed: ${probeData.message || 'Check Salt Key and Salt Index'}`
+            status: 'auth_failed',
+            message: `Razorpay rejected credentials: ${desc}`
           });
         }
-
+      } catch (fetchErr: any) {
         return res.json({
           success: true,
-          mode: isProduction ? 'PRODUCTION (Live Gateway)' : 'UAT / Sandbox (Test Gateway)',
-          merchantId,
-          message: isProduction
-            ? `Production Ready! PhonePe Live Merchant (${merchantId}) and Salt Key verified.`
-            : `UAT Simulator Ready! PhonePe Test Merchant (${merchantId}) and Salt Key verified.`
-        });
-      } catch {
-        return res.json({
-          success: true,
-          message: `Format valid for ${merchantId}. Credentials saved successfully.`
+          status: 'network_warning',
+          message: `Key format valid (${keyId.startsWith('rzp_live_') ? 'Live' : 'Test'}). Note: External ping timed out, but keys are saved.`
         });
       }
     } catch (err: any) {
-      console.error('Error testing PhonePe credentials:', err);
-      res.status(500).json({ success: false, message: 'Internal error testing PhonePe credentials.' });
+      console.error('Error in test-keys:', err);
+      res.status(500).json({ success: false, message: 'Internal error testing keys.' });
     }
   };
 
-  app.post('/api/phonepe/test-keys', handleTestPhonePe);
-  app.post('/api/payments/test-keys', handleTestPhonePe);
+  app.post('/api/razorpay/test-keys', handleTestKeysEndpoint);
+  app.post('/api/payments/test-keys', handleTestKeysEndpoint);
 
   // --- PAYMENT & SECURE DOWNLOAD UTILITIES ---
   const DOWNLOAD_SECRET = process.env.DOWNLOAD_SECRET || 'lifehut_secure_cad_token_key';
@@ -1057,10 +1067,10 @@ async function startServer() {
     return expectedSignature.toLowerCase() === providedSignature.toLowerCase();
   }
 
-  // Common Order Creation Handler via PhonePe PG Pay Page API
-  const handlePhonePePay = async (req: express.Request, res: express.Response) => {
+  // Common Order Creation Handler (Real Razorpay Checkout Only - No Sandbox / Test Simulation)
+  const handleCreateOrder = async (req: express.Request, res: express.Response) => {
     try {
-      const { planId, clientName, clientEmail, clientPhone, amount, merchantId: clientMID, saltKey: clientSaltKey } = req.body;
+      const { planId, clientName, clientEmail, clientPhone, amount } = req.body;
       const db = readDB();
       const plans = db.housePlans || defaultHousePlans;
       const plan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId);
@@ -1074,7 +1084,7 @@ async function startServer() {
       }
 
       const amountInPaise = Math.round(finalAmount * 100);
-      const config = await getActivePhonePeConfig(clientMID, clientSaltKey);
+      const config = await getActiveRazorpayConfig();
 
       if (!config.enabled) {
         return res.status(403).json({
@@ -1083,90 +1093,50 @@ async function startServer() {
         });
       }
 
-      const isProduction = config.mode === 'PRODUCTION';
-      const apiHost = isProduction
-        ? 'https://api.phonepe.com/apis/hermes'
-        : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
-
-      const merchantTransactionId = `MT_LH_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const merchantUserId = `MUID_LH_${Date.now()}`;
-      const cleanPhone = (clientPhone || '').replace(/\D/g, '').slice(-10) || '9876543210';
-
-      const host = req.get('host') || 'localhost:3000';
-      const protocol = req.protocol || 'http';
-      const origin = `${protocol}://${host}`;
-      const redirectUrl = `${origin}/house-plans?phonepe_txn=${encodeURIComponent(merchantTransactionId)}&plan_id=${encodeURIComponent(plan?.id || planId)}`;
-      const callbackUrl = `${origin}/api/phonepe/status`;
-
-      // Helper function to invoke PhonePe Pay
-      async function executePhonePePay(mid: string, sKey: string, sIdx: string) {
-        const payload = {
-          merchantId: mid,
-          merchantTransactionId,
-          merchantUserId,
-          amount: amountInPaise,
-          redirectUrl: `${origin}/house-plans?phonepe_txn=${encodeURIComponent(merchantTransactionId)}&plan_id=${encodeURIComponent(plan?.id || planId)}&mid=${encodeURIComponent(mid)}`,
-          redirectMode: 'REDIRECT',
-          callbackUrl,
-          mobileNumber: cleanPhone,
-          paymentInstrument: {
-            type: 'PAY_PAGE'
-          }
-        };
-
-        const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64');
-        const sha256 = crypto.createHash('sha256').update(base64Payload + '/pg/v1/pay' + sKey).digest('hex');
-        const xVerify = `${sha256}###${sIdx}`;
-
-        const res = await fetch(`${apiHost}/pg/v1/pay`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-VERIFY': xVerify
-          },
-          body: JSON.stringify({ request: base64Payload })
+      if (!config.keyId || !config.keySecret) {
+        return res.status(400).json({
+          success: false,
+          message: 'Razorpay payment gateway credentials (Key ID and Secret) are not configured on the server. Please enter your Razorpay keys in Admin Settings.'
         });
-
-        const data: any = await res.json().catch(() => ({}));
-        return { res, data, mid };
       }
 
-      let payResult = await executePhonePePay(config.merchantId, config.saltKey, config.saltIndex);
+      const authHeader = 'Basic ' + Buffer.from(`${config.keyId}:${config.keySecret}`).toString('base64');
+      const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          amount: amountInPaise,
+          currency: 'INR',
+          receipt: `rcpt_lh_${Date.now().toString().slice(-8)}`,
+          notes: {
+            planId: plan?.id || planId,
+            planCode: plan?.planCode || '',
+            title: plan?.title || 'House Plan Blueprints',
+            clientName: clientName || '',
+            clientPhone: clientPhone || ''
+          }
+        })
+      });
 
-      // If in UAT and PhonePe rejected with KEY_NOT_CONFIGURED or "Key not found",
-      // gracefully fallback to PhonePe's active official UAT simulator credentials (PGTESTPAYUAT86)
-      if (
-        !isProduction &&
-        (!payResult.res.ok || !payResult.data?.success) &&
-        (payResult.data?.code === 'KEY_NOT_CONFIGURED' ||
-         String(payResult.data?.message || '').toLowerCase().includes('key not found') ||
-         config.merchantId !== 'PGTESTPAYUAT86')
-      ) {
-        const fallback = await executePhonePePay('PGTESTPAYUAT86', '96434309-7796-489d-8924-ab56988a6076', '1');
-        if (fallback.res.ok && fallback.data?.success) {
-          payResult = fallback;
-        }
+      if (!rzpResponse.ok) {
+        const errJson = (await rzpResponse.json().catch(() => ({}))) as any;
+        const errDesc = errJson?.error?.description || errJson?.message || 'Razorpay order creation failed.';
+        return res.status(rzpResponse.status).json({
+          success: false,
+          message: `Razorpay Error: ${errDesc}`
+        });
       }
 
-      if (!payResult.res.ok || !payResult.data?.success) {
-        const errMsg = payResult.data?.message || `PhonePe PG responded with status ${payResult.res.status}`;
-        return res.status(400).json({ success: false, message: `PhonePe error: ${errMsg}` });
-      }
-
-      const paymentUrl = payResult.data?.data?.instrumentResponse?.redirectInfo?.url;
-      if (!paymentUrl) {
-        return res.status(500).json({ success: false, message: 'Could not obtain checkout URL from PhonePe.' });
-      }
-
+      const orderData = (await rzpResponse.json()) as any;
       return res.json({
         success: true,
-        transactionId: merchantTransactionId,
-        paymentUrl,
-        redirectUrl: paymentUrl,
-        amount: finalAmount,
-        currency: 'INR',
-        merchantId: payResult.mid,
-        mode: config.mode,
+        orderId: orderData.id,
+        amount: orderData.amount,
+        currency: orderData.currency || 'INR',
+        keyId: config.keyId,
         plan: {
           id: plan?.id,
           planCode: plan?.planCode,
@@ -1175,102 +1145,82 @@ async function startServer() {
         }
       });
     } catch (err: any) {
-      console.error('Error creating PhonePe order:', err);
-      res.status(500).json({ success: false, message: err.message || 'Failed to create PhonePe payment order' });
+      console.error('Error creating Razorpay order:', err);
+      res.status(500).json({ success: false, message: err.message || 'Failed to create payment order' });
     }
   };
 
-  app.post('/api/phonepe/pay', handlePhonePePay);
-  app.post('/api/payments/create-order', handlePhonePePay);
+  app.post('/api/payments/create-order', handleCreateOrder);
+  app.post('/api/razorpay/create-order', handleCreateOrder);
 
-  // Common Payment Status & Verification Handler via PhonePe Status API
-  const handlePhonePeStatus = async (req: express.Request, res: express.Response) => {
+  // Common Payment Verification Handler (Cryptographic HMAC-SHA256 signature verification only)
+  const handleVerifyPayment = async (req: express.Request, res: express.Response) => {
     try {
-      const transactionId = (req.query.transactionId || req.query.txnId || req.body?.transactionId || req.body?.txnId || req.body?.merchantTransactionId || '').toString();
-      const planId = (req.query.planId || req.query.plan_id || req.body?.planId || req.body?.plan_id || '').toString();
-      const clientName = req.query.clientName || req.body?.clientName;
-      const clientPhone = req.query.clientPhone || req.body?.clientPhone;
-      const clientEmail = req.query.clientEmail || req.body?.clientEmail;
+      const {
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+        planId,
+        clientName,
+        clientEmail,
+        clientPhone,
+        notes,
+        keySecret
+      } = req.body;
 
-      if (!transactionId) {
+      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
         return res.status(400).json({
           success: false,
           verified: false,
-          message: 'Transaction ID is required to verify PhonePe payment.'
-        });
-      }
-
-      const config = await getActivePhonePeConfig();
-      const isProduction = config.mode === 'PRODUCTION';
-      const apiHost = isProduction
-        ? 'https://api.phonepe.com/apis/hermes'
-        : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
-
-      // Helper function to query status
-      async function queryStatusApi(mid: string, sKey: string, sIdx: string) {
-        const statusPath = `/pg/v1/status/${mid}/${transactionId}`;
-        const sha256 = crypto.createHash('sha256').update(statusPath + sKey).digest('hex');
-        const xVerify = `${sha256}###${sIdx}`;
-
-        try {
-          const res = await fetch(`${apiHost}${statusPath}`, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-VERIFY': xVerify,
-              'X-MERCHANT-ID': mid
-            }
-          });
-          const data: any = await res.json().catch(() => ({}));
-          return { res, data, ok: res.ok };
-        } catch (err: any) {
-          return { res: null, data: null, ok: false, error: err };
-        }
-      }
-
-      let check = await queryStatusApi(config.merchantId, config.saltKey, config.saltIndex);
-
-      if (
-        !isProduction &&
-        (!check.ok || !check.data?.success) &&
-        (check.data?.code === 'KEY_NOT_CONFIGURED' ||
-         String(check.data?.message || '').toLowerCase().includes('key not found') ||
-         config.merchantId !== 'PGTESTPAYUAT86')
-      ) {
-        const fallbackCheck = await queryStatusApi('PGTESTPAYUAT86', '96434309-7796-489d-8924-ab56988a6076', '1');
-        if (fallbackCheck.ok || fallbackCheck.data?.code !== 'KEY_NOT_CONFIGURED') {
-          check = fallbackCheck;
-        }
-      }
-
-      const ppeData = check.data;
-      const isSuccess = Boolean(
-        ppeData?.success === true &&
-        (ppeData?.code === 'PAYMENT_SUCCESS' || ppeData?.data?.responseCode === 'SUCCESS' || ppeData?.data?.state === 'COMPLETED')
-      );
-
-      if (!isSuccess) {
-        return res.json({
-          success: false,
-          verified: false,
-          code: ppeData?.code || 'PAYMENT_PENDING',
-          message: ppeData?.message || 'Payment has not been completed yet.',
-          transactionId
+          message: 'Missing required payment verification credentials.'
         });
       }
 
       const db = readDB();
+      const config = await getActiveRazorpayConfig();
+      const effectiveSecret = (keySecret || config.keySecret || '').trim();
+
+      if (!effectiveSecret) {
+        return res.status(500).json({
+          success: false,
+          verified: false,
+          message: 'Razorpay Secret Key is not configured on the server. Cannot verify payment.'
+        });
+      }
+
+      // Persist secret in db.settings if provided by client so future calls don't need to pass it
+      if (keySecret && !db.settings?.razorpayKeySecret) {
+        if (!db.settings) db.settings = { ...defaultSettings };
+        db.settings.razorpayKeySecret = keySecret;
+        writeDB(db);
+      }
+
+      const body = razorpay_order_id + '|' + razorpay_payment_id;
+      const expectedSignature = crypto
+        .createHmac('sha256', effectiveSecret)
+        .update(body.toString())
+        .digest('hex');
+
+      if (expectedSignature.toLowerCase() !== razorpay_signature.toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          message: 'Cryptographic signature verification failed. Payment was not confirmed by Razorpay.'
+        });
+      }
+
       const plans = db.housePlans || defaultHousePlans;
       const plan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId);
 
-      const paymentId = transactionId;
+      // Record genuine verified purchase in db.enquiries for admin records
+      const paymentId = razorpay_payment_id;
       const newEnquiry: Enquiry = {
-        id: `phonepe_cad_${Date.now()}`,
-        name: (clientName as string) || 'Verified Homeowner',
-        email: (clientEmail as string) || '',
-        phone: (clientPhone as string) || '',
+        id: `cad_order_${Date.now()}`,
+        name: clientName || 'Verified Homeowner',
+        email: clientEmail || '',
+        phone: clientPhone || '',
         service: `CAD & PDF Drawings: ${plan?.planCode || planId}`,
-        message: `Paid ₹${plan?.cadPackagePrice || 999} via PhonePe Payment Gateway (Transaction ID: ${paymentId}).`,
+        message: `Paid ₹${plan?.cadPackagePrice || 999} via Razorpay (Payment ID: ${paymentId}, Order: ${razorpay_order_id}). ${notes || ''}`,
         date: new Date().toISOString(),
         status: 'New'
       };
@@ -1279,35 +1229,65 @@ async function startServer() {
       db.enquiries.unshift(newEnquiry);
       writeDB(db);
 
-      const secret = config.saltKey || DOWNLOAD_SECRET;
+      const secret = effectiveSecret || DOWNLOAD_SECRET;
       const downloadToken = generateDownloadToken(plan?.id || planId, paymentId, secret);
       const downloadUrl = `/api/download?planId=${encodeURIComponent(plan?.id || planId)}&token=${encodeURIComponent(downloadToken)}&paymentId=${encodeURIComponent(paymentId)}`;
+
+      // Record verified purchase in db.orders for admin Orders & Sales dashboard
+      const newOrder: HousePlanOrder = {
+        id: `ord_${Date.now()}`,
+        orderId: razorpay_order_id,
+        planId: plan?.id || planId,
+        planTitle: plan?.title || 'House Plan Blueprints',
+        planCode: plan?.planCode || '',
+        amount: Number(plan?.cadPackagePrice) || 999,
+        currency: 'INR',
+        customerName: clientName || 'Verified Homeowner',
+        customerEmail: clientEmail || '',
+        customerPhone: clientPhone || '',
+        paymentMethod: 'Razorpay',
+        paymentStatus: 'Completed',
+        deliveryStatus: 'Delivered',
+        transactionId: razorpay_payment_id,
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        notes: notes || 'Online Razorpay checkout',
+        createdAt: new Date().toISOString(),
+        downloadToken,
+        downloadUrl
+      };
+
+      if (!db.orders) db.orders = [];
+      const orderExists = db.orders.some(o => o.transactionId === paymentId || o.razorpayPaymentId === paymentId);
+      if (!orderExists) {
+        db.orders.unshift(newOrder);
+      }
+
+      if (plan) {
+        plan.purchaseCount = (Number(plan.purchaseCount) || 0) + 1;
+      }
+      writeDB(db);
 
       return res.json({
         success: true,
         verified: true,
-        code: 'PAYMENT_SUCCESS',
-        message: 'Payment verified successfully! Your CAD & PDF package is unlocked.',
+        message: 'Payment verified successfully! Your CAD & PDF package is ready for download.',
         downloadUrl,
         downloadToken,
         paymentId,
-        transactionId,
-        phonepeTxnId: ppeData?.data?.transactionId || transactionId,
-        amount: (ppeData?.data?.amount || 99900) / 100,
+        orderId: razorpay_order_id,
         planCode: plan?.planCode,
         planTitle: plan?.title,
         fileName: plan?.cadPackageFileName || `${plan?.planCode || 'Lifehut'}-CAD-Package.zip`
       });
     } catch (err: any) {
-      console.error('Error verifying PhonePe status:', err);
+      console.error('Error verifying Razorpay payment:', err);
       res.status(500).json({ success: false, message: err.message || 'Payment verification failed' });
     }
   };
 
-  app.get('/api/phonepe/status', handlePhonePeStatus);
-  app.post('/api/phonepe/status', handlePhonePeStatus);
-  app.get('/api/payments/verify', handlePhonePeStatus);
-  app.post('/api/payments/verify', handlePhonePeStatus);
+  app.post('/api/payments/verify', handleVerifyPayment);
+  app.post('/api/razorpay/verify-payment', handleVerifyPayment);
 
   // Claim Free Package Endpoint
   app.post('/api/payments/claim-free', async (req, res) => {
@@ -1321,7 +1301,7 @@ async function startServer() {
       if (price > 0 && !isFreePlan) {
         return res.status(403).json({
           success: false,
-          message: 'This CAD drawings package requires a paid purchase through PhonePe checkout.'
+          message: 'This CAD drawings package requires a paid purchase through Razorpay checkout.'
         });
       }
 
@@ -1333,8 +1313,8 @@ async function startServer() {
       }
 
       const freeClaimId = `FREE_${Date.now()}`;
-      const config = await getActivePhonePeConfig();
-      const secret = config.saltKey || DOWNLOAD_SECRET;
+      const config = await getActiveRazorpayConfig();
+      const secret = config.keySecret || DOWNLOAD_SECRET;
       const downloadToken = generateDownloadToken(plan?.id || planId, freeClaimId, secret);
       const downloadUrl = `/api/download?planId=${encodeURIComponent(plan?.id || planId)}&token=${encodeURIComponent(downloadToken)}&paymentId=${encodeURIComponent(freeClaimId)}`;
 
@@ -1350,6 +1330,34 @@ async function startServer() {
       };
       if (!db.enquiries) db.enquiries = [];
       db.enquiries.unshift(newEnquiry);
+
+      // Record free claim in db.orders for admin tracking
+      const freeOrder: HousePlanOrder = {
+        id: `ord_${Date.now()}`,
+        orderId: freeClaimId,
+        planId: plan?.id || planId,
+        planTitle: plan?.title || 'House Plan Blueprints',
+        planCode: plan?.planCode || '',
+        amount: 0,
+        currency: 'INR',
+        customerName: clientName,
+        customerEmail: clientEmail || '',
+        customerPhone: clientPhone,
+        paymentMethod: 'Free Claim',
+        paymentStatus: 'Completed',
+        deliveryStatus: 'Delivered',
+        transactionId: freeClaimId,
+        notes: 'Claimed free promotional CAD blueprint package',
+        createdAt: new Date().toISOString(),
+        downloadToken,
+        downloadUrl
+      };
+      if (!db.orders) db.orders = [];
+      db.orders.unshift(freeOrder);
+
+      if (plan) {
+        plan.purchaseCount = (Number(plan.purchaseCount) || 0) + 1;
+      }
       writeDB(db);
 
       return res.json({
@@ -1376,8 +1384,8 @@ async function startServer() {
         return res.status(400).json({ success: false, message: 'Plan identifier is missing.' });
       }
 
-      const config = await getActivePhonePeConfig();
-      const secret = config.saltKey || DOWNLOAD_SECRET;
+      const config = await getActiveRazorpayConfig();
+      const secret = config.keySecret || DOWNLOAD_SECRET;
 
       // Strictly verify cryptographic download token
       const isTokenValid = verifyDownloadToken(planId, paymentId, token, secret) ||
@@ -1386,7 +1394,7 @@ async function startServer() {
       if (!isTokenValid) {
         return res.status(403).json({
           success: false,
-          message: 'Payment verification required. Downloads are strictly protected and require a verified purchase through PhonePe checkout.'
+          message: 'Payment verification required. Downloads are strictly protected and require a verified purchase through Razorpay checkout.'
         });
       }
 
@@ -1406,15 +1414,41 @@ async function startServer() {
         return res.status(404).json({ success: false, message: 'House plan not found.' });
       }
 
-      if (!plan.cadPackageZipUrl) {
-        return res.status(404).json({ success: false, message: 'No attached drawing ZIP folder found for this plan.' });
+      let zipUrl = plan?.cadPackageZipUrl || plan?.cadPackageBase64;
+      let targetFileName = plan?.cadPackageFileName || `${plan?.planCode || 'HousePlan'}-Drawings.zip`;
+
+      // 1. If not present in local db, or if it points to a missing local file, query Supabase house_plans table
+      if (!zipUrl || (zipUrl.startsWith('/uploads/') && !fs.existsSync(path.join(process.cwd(), zipUrl.slice(1))))) {
+        try {
+          const sbUrl = process.env.VITE_SUPABASE_URL || 'https://vkthcqceywhdlmjsvsze.supabase.co';
+          const sbKey = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable__eUGKx9jON0kZ1dVrBRmLw_-huhN1d7';
+          const sbRes = await fetch(`${sbUrl}/rest/v1/house_plans?or=(id.eq.${encodeURIComponent(planId)},slug.eq.${encodeURIComponent(planId)},plan_code.eq.${encodeURIComponent(planId)})&select=cad_package_zip_url,cad_package_file_name,cad_package_size&limit=1`, {
+            headers: {
+              apikey: sbKey,
+              Authorization: `Bearer ${sbKey}`
+            }
+          });
+          if (sbRes.ok) {
+            const rows: any = await sbRes.json();
+            if (rows?.[0]?.cad_package_zip_url) {
+              zipUrl = rows[0].cad_package_zip_url;
+              if (rows[0].cad_package_file_name) {
+                targetFileName = rows[0].cad_package_file_name;
+              }
+            }
+          }
+        } catch (sbErr) {
+          console.warn('Supabase fetch in download error:', sbErr);
+        }
       }
 
-      const targetFileName = plan.cadPackageFileName || `${plan.planCode}-Drawings.zip`;
+      if (!zipUrl) {
+        return res.status(404).json({ success: false, message: 'No uploaded drawing ZIP package found for this plan. Please upload the ZIP file in Admin Panel.' });
+      }
 
-      // 1. If stored as Base64 Data URI
-      if (plan.cadPackageZipUrl.startsWith('data:')) {
-        const base64Data = plan.cadPackageZipUrl.replace(/^data:[^;]+;base64,/, '');
+      // 2. If stored as Base64 Data URI in cadPackageZipUrl (e.g. from Supabase)
+      if (zipUrl.startsWith('data:')) {
+        const base64Data = zipUrl.replace(/^data:[^;]+;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
@@ -1422,45 +1456,25 @@ async function startServer() {
         return res.send(buffer);
       }
 
-      // 2. If an uploaded ZIP file exists locally on disk in uploads/cad-packages/
-      if (plan.cadPackageZipUrl.startsWith('/uploads/cad-packages/')) {
-        const localDiskPath = path.join(process.cwd(), plan.cadPackageZipUrl);
-        if (fs.existsSync(localDiskPath)) {
+      // 3. If an uploaded ZIP file exists locally on disk in uploads/ or relative path
+      if (!zipUrl.startsWith('http://') && !zipUrl.startsWith('https://')) {
+        const cleanRelPath = zipUrl.startsWith('/') ? zipUrl.slice(1) : zipUrl;
+        const localDiskPath = path.join(process.cwd(), cleanRelPath);
+        if (fs.existsSync(localDiskPath) && fs.statSync(localDiskPath).isFile()) {
           res.setHeader('Content-Type', 'application/zip');
           res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
           return fs.createReadStream(localDiskPath).pipe(res);
         }
-
-        // If file is not yet on disk but was persisted as base64 in database
-        if (plan.cadPackageBase64) {
-          const base64Data = plan.cadPackageBase64.replace(/^data:[^;]+;base64,/, '');
-          const buffer = Buffer.from(base64Data, 'base64');
-          fs.writeFileSync(localDiskPath, buffer);
-          res.setHeader('Content-Type', 'application/zip');
-          res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
-          res.setHeader('Content-Length', buffer.length.toString());
-          return res.send(buffer);
-        }
       }
 
-      // 3. If an uploaded ZIP exists on an external URL or Supabase storage
-      if (plan.cadPackageZipUrl.startsWith('http://') || plan.cadPackageZipUrl.startsWith('https://')) {
-        return res.redirect(plan.cadPackageZipUrl);
-      }
-
-      // 4. Any other relative path on disk
-      if (plan.cadPackageZipUrl.startsWith('/')) {
-        const localPath = path.join(process.cwd(), plan.cadPackageZipUrl);
-        if (fs.existsSync(localPath)) {
-          res.setHeader('Content-Type', 'application/zip');
-          res.setHeader('Content-Disposition', `attachment; filename="${targetFileName}"`);
-          return fs.createReadStream(localPath).pipe(res);
-        }
+      // 4. If an uploaded ZIP exists on an external URL or Supabase storage
+      if (zipUrl.startsWith('http://') || zipUrl.startsWith('https://')) {
+        return res.redirect(zipUrl);
       }
 
       return res.status(404).json({
         success: false,
-        message: 'The attached drawing ZIP file was not found on the server. Please attach or re-upload it in Admin Panel.'
+        message: 'No uploaded drawing ZIP file found for this plan. Please upload it in the Admin Panel.'
       });
     } catch (err: any) {
       console.error('Error downloading attached CAD zip:', err);
@@ -1470,6 +1484,77 @@ async function startServer() {
 
   app.get('/api/download', handleProtectedDownload);
   app.get('/api/house-plans/:id/download-cad', handleProtectedDownload);
+
+  // --- HOUSE PLAN ORDERS & SALES DASHBOARD ENDPOINTS ---
+  app.get('/api/orders', (req, res) => {
+    const db = readDB();
+    res.json(db.orders || []);
+  });
+
+  app.post('/api/orders', (req, res) => {
+    const db = readDB();
+    if (!db.orders) db.orders = [];
+    const newOrder: HousePlanOrder = {
+      id: req.body.id || `ord_${Date.now()}`,
+      ...req.body,
+      createdAt: req.body.createdAt || new Date().toISOString(),
+      paymentStatus: req.body.paymentStatus || 'Completed',
+      deliveryStatus: req.body.deliveryStatus || 'Delivered'
+    };
+    
+    // Check if order already recorded by transaction ID or razorpay payment ID or ID
+    const existingIdx = db.orders.findIndex(
+      o => (newOrder.transactionId && o.transactionId === newOrder.transactionId) ||
+           (newOrder.razorpayPaymentId && o.razorpayPaymentId === newOrder.razorpayPaymentId) ||
+           o.id === newOrder.id
+    );
+
+    if (existingIdx !== -1) {
+      db.orders[existingIdx] = { ...db.orders[existingIdx], ...newOrder };
+    } else {
+      db.orders.unshift(newOrder);
+    }
+
+    const plan = db.housePlans?.find(p => p.id === newOrder.planId || p.planCode === newOrder.planCode);
+    if (plan) {
+      plan.purchaseCount = (Number(plan.purchaseCount) || 0) + 1;
+    }
+    writeDB(db);
+    res.json({ success: true, order: newOrder });
+  });
+
+  app.put('/api/orders/:id', (req, res) => {
+    const db = readDB();
+    if (!db.orders) db.orders = [];
+    const idx = db.orders.findIndex(o => o.id === req.params.id);
+    if (idx !== -1) {
+      db.orders[idx] = { ...db.orders[idx], ...req.body };
+      writeDB(db);
+      return res.json({ success: true, order: db.orders[idx] });
+    }
+    res.status(404).json({ success: false, message: 'Order not found.' });
+  });
+
+  app.delete('/api/orders/:id', (req, res) => {
+    const db = readDB();
+    if (!db.orders) db.orders = [];
+    db.orders = db.orders.filter(o => o.id !== req.params.id);
+    writeDB(db);
+    res.json({ success: true });
+  });
+
+  // Track house plan view counter
+  app.post('/api/house-plans/:id/view', (req, res) => {
+    const db = readDB();
+    const plans = db.housePlans || defaultHousePlans;
+    const plan = plans.find(p => p.id === req.params.id || p.slug === req.params.id || p.planCode === req.params.id);
+    if (plan) {
+      plan.views = (Number(plan.views) || 0) + 1;
+      writeDB(db);
+      return res.json({ success: true, views: plan.views });
+    }
+    res.json({ success: false });
+  });
 
   // Testimonial CRUD
   app.post('/api/testimonials', (req, res) => {
@@ -1630,9 +1715,6 @@ Sitemap: https://lifehutdevelopers.com/sitemap.xml`);
       { loc: '/blogs', changefreq: 'daily', priority: '0.8' },
       { loc: '/quote', changefreq: 'monthly', priority: '0.9' },
       { loc: '/contact', changefreq: 'monthly', priority: '0.8' },
-      { loc: '/privacy-policy', changefreq: 'monthly', priority: '0.5' },
-      { loc: '/terms-and-conditions', changefreq: 'monthly', priority: '0.5' },
-      { loc: '/refund-policy', changefreq: 'monthly', priority: '0.5' },
     ];
 
     // Add house plans
@@ -1648,11 +1730,6 @@ Sitemap: https://lifehutdevelopers.com/sitemap.xml`);
     // Add services
     db.services.forEach(s => {
       urls.push({ loc: `/services/${s.id}`, changefreq: 'weekly', priority: '0.6' });
-    });
-
-    // Add projects
-    db.projects.forEach(p => {
-      urls.push({ loc: `/projects/${p.id}`, changefreq: 'weekly', priority: '0.7' });
     });
 
     let xml = `<?xml version="1.0" encoding="UTF-8"?>

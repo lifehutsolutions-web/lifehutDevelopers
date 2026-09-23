@@ -39,7 +39,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Breadcrumbs } from './Breadcrumbs';
-import { HousePlan, Settings } from '../types';
+import { HousePlan, Settings, HousePlanOrder } from '../types';
 import { defaultHousePlans } from '../data/defaultHousePlans';
 
 interface HousePlansProps {
@@ -223,7 +223,7 @@ export const HousePlans: React.FC<HousePlansProps> = ({
     setIsPdfModalOpen(true);
   };
 
-  const triggerDownloadCadZip = (plan: HousePlan, overrideUrl?: string | null) => {
+  const triggerDownloadCadZip = async (plan: HousePlan, overrideUrl?: string | null) => {
     const targetUrl = overrideUrl || authorizedDownloadUrl;
 
     // Security Gate: Paid packages require verified payment URL
@@ -233,59 +233,105 @@ export const HousePlans: React.FC<HousePlansProps> = ({
     }
 
     setDownloadingCadFile(true);
+    setPaymentError(null);
     try {
-      const fileName = plan.cadPackageFileName || `${plan.planCode}-Drawings.zip`;
+      const fileName = plan.cadPackageFileName || `${plan.planCode}-Architectural-CAD-Package.zip`;
 
       // 1. If an authorized token-protected URL was issued by the server
       if (targetUrl) {
-        const link = document.createElement('a');
-        link.href = targetUrl;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
+        try {
+          const resp = await fetch(targetUrl);
+          if (resp.ok) {
+            const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+            // Ensure we didn't receive an error JSON masquerading as a download
+            if (contentType.includes('application/json')) {
+              const json = await resp.json().catch(() => null);
+              throw new Error(json?.message || 'Server returned an invalid response instead of a ZIP package.');
+            }
+
+            const blob = await resp.blob();
+            if (blob.size < 50) {
+              throw new Error('Downloaded drawing archive is empty. Please contact our support team.');
+            }
+
+            const objectUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = objectUrl;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+            setDownloadingCadFile(false);
+            return;
+          } else {
+            const errData = await resp.json().catch(() => null);
+            throw new Error(errData?.message || `Server responded with HTTP ${resp.status}`);
+          }
+        } catch (fetchErr: any) {
+          console.warn('Direct fetch download notice, checking uploaded plan package from Supabase:', fetchErr);
+
+          // If plan has uploaded ZIP from Supabase
+          const directZip = plan.cadPackageZipUrl || plan.cadPackageBase64;
+          if (directZip && directZip.startsWith('data:')) {
+            const arr = directZip.split(',');
+            const mime = arr[0].match(/:(.*?);/)?.[1] || 'application/zip';
+            const bstr = atob(arr[1]);
+            let n = bstr.length;
+            const u8arr = new Uint8Array(n);
+            while (n--) {
+              u8arr[n] = bstr.charCodeAt(n);
+            }
+            const blob = new Blob([u8arr], { type: mime });
+            const blobUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+            setDownloadingCadFile(false);
+            return;
+          }
+
+          // No fallback zip: show clear message
+          setPaymentError(`No uploaded package found on the server for plan ${plan.planCode}. Please contact us via WhatsApp (+91 80721 63330) with Payment ID (${paymentTxnId || 'Verified'}) for drawing file transfer.`);
+          setDownloadingCadFile(false);
+          return;
+        }
       }
 
-      // 2. Fallback for free plans (price === 0)
-      const attachedUrl = plan.cadPackageZipUrl;
+      // 2. Direct download if plan has uploaded package
+      const attachedUrl = plan.cadPackageZipUrl || plan.cadPackageBase64;
       if (!attachedUrl) {
-        // Generate an official architectural package receipt & drawing manifest download
-        const manifestText = `=====================================================
-LIFEHUT DEVELOPERS - ARCHITECTURAL BLUEPRINT ORDER RECEIPT
-=====================================================
-Order Confirmation & Technical Specifications
-Plan Code: ${plan.planCode}
-Title: ${plan.title}
-Plot Dimension: ${plan.plotDimensions}
-Built-up Area: ${plan.builtUpArea} sq.ft
-Price Paid: ₹${plan.cadPackagePrice || 0}
-Deliverable Package: AutoCAD DWG 2D/3D + Structural Schedules + High-Res PDF Blueprints
-
-STATUS: Free Package Claimed
-Contact Engineering Support:
-Phone / WhatsApp: +91 80721 63330
-Email: lifehutdevelopers@gmail.com
-Chennai, Tamil Nadu
-=====================================================`;
-        const blob = new Blob([manifestText], { type: 'text/plain;charset=utf-8' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `${plan.planCode}-Blueprint-Order-Receipt.txt`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // No fallback zip: show clear message
+        setPaymentError(`No drawing package has been uploaded by the admin for ${plan.planCode}. Please upload the ZIP in the Admin Panel or contact support.`);
+        setDownloadingCadFile(false);
         return;
       }
 
       if (attachedUrl.startsWith('data:')) {
-        // Base64 Data URL attached directly
+        // Base64 Data URL attached directly from Supabase
+        const arr = attachedUrl.split(',');
+        const mime = arr[0].match(/:(.*?);/)?.[1] || 'application/zip';
+        const bstr = atob(arr[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) {
+          u8arr[n] = bstr.charCodeAt(n);
+        }
+        const blob = new Blob([u8arr], { type: mime });
+        const blobUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');
-        link.href = attachedUrl;
+        link.href = blobUrl;
         link.download = fileName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+        setDownloadingCadFile(false);
+        return;
       } else {
         const link = document.createElement('a');
         link.href = attachedUrl;
@@ -295,9 +341,11 @@ Chennai, Tamil Nadu
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        setDownloadingCadFile(false);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Attached ZIP download error:', err);
+      setPaymentError('Download could not be initiated. Please verify that an uploaded ZIP is attached to this plan.');
     } finally {
       setTimeout(() => setDownloadingCadFile(false), 2000);
     }
@@ -491,15 +539,69 @@ Chennai, Tamil Nadu
 
             const verifyData = verifyRes && verifyRes.ok ? await verifyRes.json().catch(() => null) : null;
 
-            if (verifyData && (verifyData.verified || verifyData.success) && verifyData.downloadUrl) {
+            if (verifyData && (verifyData.verified || verifyData.success)) {
               const confirmedTxnId = verifyData.paymentId || response.razorpay_payment_id;
+              const downloadUrl = verifyData.downloadUrl || `/api/download?planId=${encodeURIComponent(currentCadPlan.id)}&paymentId=${encodeURIComponent(confirmedTxnId)}&token=${encodeURIComponent(verifyData.downloadToken || '')}`;
+
               setPaymentTxnId(confirmedTxnId);
-              setAuthorizedDownloadUrl(verifyData.downloadUrl);
+              setAuthorizedDownloadUrl(downloadUrl);
               setPaymentSuccess(true);
               setPaymentError(null);
 
-              // Auto trigger verified download
-              triggerDownloadCadZip(currentCadPlan, verifyData.downloadUrl);
+              // 1. Construct HousePlanOrder record for dashboard
+              const completedOrder: HousePlanOrder = {
+                id: `ord_${Date.now()}`,
+                orderId: response.razorpay_order_id,
+                transactionId: confirmedTxnId,
+                razorpayOrderId: response.razorpay_order_id,
+                razorpayPaymentId: response.razorpay_payment_id,
+                planId: currentCadPlan.id,
+                planCode: currentCadPlan.planCode,
+                planTitle: currentCadPlan.title,
+                amount: Number(currentCadPlan.cadPackagePrice) || 999,
+                currency: 'INR',
+                customerName: clientName || 'Verified Homeowner',
+                customerEmail: clientEmail || '',
+                customerPhone: clientPhone || '',
+                paymentMethod: 'Razorpay',
+                paymentStatus: 'Completed',
+                deliveryStatus: 'Delivered',
+                downloadToken: verifyData.downloadToken,
+                downloadUrl: downloadUrl,
+                createdAt: new Date().toISOString(),
+                notes: 'Razorpay verified online checkout'
+              };
+
+              // 2. Persist immediately to localStorage
+              try {
+                const existingRaw = localStorage.getItem('lifehut_local_orders');
+                const existingOrders: HousePlanOrder[] = existingRaw ? JSON.parse(existingRaw) : [];
+                const alreadyRecorded = existingOrders.some(
+                  o => (o.transactionId && o.transactionId === confirmedTxnId) ||
+                       (o.razorpayPaymentId && o.razorpayPaymentId === response.razorpay_payment_id)
+                );
+                if (!alreadyRecorded) {
+                  existingOrders.unshift(completedOrder);
+                  localStorage.setItem('lifehut_local_orders', JSON.stringify(existingOrders));
+                }
+              } catch (storageErr) {
+                console.warn('Could not save order to localStorage:', storageErr);
+              }
+
+              // 3. Broadcast real-time order update event for Admin Orders & Sales dashboard
+              try {
+                window.dispatchEvent(new CustomEvent('lifehut_orders_updated', { detail: completedOrder }));
+              } catch {}
+
+              // 4. Save to Express server /api/orders
+              fetch('/api/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(completedOrder)
+              }).catch(err => console.warn('Could not sync order to /api/orders:', err));
+
+              // 5. Trigger verified package download
+              triggerDownloadCadZip(currentCadPlan, downloadUrl);
             } else {
               setPaymentError(
                 verifyData?.message ||

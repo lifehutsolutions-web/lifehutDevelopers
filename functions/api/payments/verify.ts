@@ -117,6 +117,43 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
 
     const downloadUrl = `/api/download?planId=${encodeURIComponent(planId)}&token=${encodeURIComponent(downloadToken)}&paymentId=${encodeURIComponent(razorpay_payment_id)}`;
 
+    // Attempt background persistence to Supabase if configured
+    try {
+      const sbUrl = context.env.VITE_SUPABASE_URL || context.env.SUPABASE_URL || 'https://vkthcqceywhdlmjsvsze.supabase.co';
+      const sbKey = context.env.VITE_SUPABASE_ANON_KEY || context.env.SUPABASE_ANON_KEY || 'sb_publishable__eUGKx9jON0kZ1dVrBRmLw_-huhN1d7';
+      const orderPayload = {
+        id: `ord_${Date.now()}`,
+        order_id: razorpay_order_id,
+        transaction_id: razorpay_payment_id,
+        razorpay_order_id,
+        razorpay_payment_id,
+        plan_id: planId,
+        customer_name: clientName || 'Verified Homeowner',
+        customer_email: clientEmail || '',
+        customer_phone: clientPhone || '',
+        amount: body.amount || 999,
+        payment_method: 'Razorpay',
+        payment_status: 'Completed',
+        delivery_status: 'Delivered',
+        download_url: downloadUrl,
+        download_token: downloadToken,
+        created_at: new Date().toISOString()
+      };
+
+      await fetch(`${sbUrl}/rest/v1/orders`, {
+        method: 'POST',
+        headers: {
+          apikey: sbKey,
+          Authorization: `Bearer ${sbKey}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal'
+        },
+        body: JSON.stringify(orderPayload)
+      }).catch(() => {});
+    } catch {
+      // safe fallback
+    }
+
     return new Response(
       JSON.stringify({
         success: true,

@@ -84,25 +84,48 @@ export const AdminOrdersAndSales: React.FC<AdminOrdersAndSalesProps> = ({
     else setLoading(true);
 
     try {
-      const res = await fetch('/api/orders');
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          setOrders(data);
+      let combinedOrders: HousePlanOrder[] = [];
+
+      // 1. Fetch from backend API
+      try {
+        const res = await fetch('/api/orders');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            combinedOrders = [...data];
+          }
         }
-      } else {
-        // Fallback to local storage if running in static mode
+      } catch (srvErr) {
+        console.warn('API orders fetch notice, reading from local cache:', srvErr);
+      }
+
+      // 2. Fetch and merge from localStorage
+      try {
         const local = localStorage.getItem('lifehut_local_orders');
         if (local) {
-          setOrders(JSON.parse(local));
+          const localOrders: HousePlanOrder[] = JSON.parse(local);
+          if (Array.isArray(localOrders)) {
+            for (const lo of localOrders) {
+              const exists = combinedOrders.some(
+                co => co.id === lo.id ||
+                     (lo.transactionId && co.transactionId === lo.transactionId) ||
+                     (lo.razorpayPaymentId && co.razorpayPaymentId === lo.razorpayPaymentId)
+              );
+              if (!exists) {
+                combinedOrders.unshift(lo);
+              }
+            }
+          }
         }
+      } catch (locErr) {
+        console.warn('Local storage orders parse notice:', locErr);
       }
+
+      // Sort by createdAt descending
+      combinedOrders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      setOrders(combinedOrders);
     } catch (err) {
-      console.error('Failed to load orders from API:', err);
-      const local = localStorage.getItem('lifehut_local_orders');
-      if (local) {
-        setOrders(JSON.parse(local));
-      }
+      console.error('Failed to load orders:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -111,6 +134,18 @@ export const AdminOrdersAndSales: React.FC<AdminOrdersAndSalesProps> = ({
 
   useEffect(() => {
     loadOrdersData();
+
+    // Auto refresh when a customer completes a checkout or order is added
+    const handleOrdersUpdated = () => {
+      loadOrdersData(true);
+    };
+
+    window.addEventListener('lifehut_orders_updated', handleOrdersUpdated);
+    window.addEventListener('storage', handleOrdersUpdated);
+    return () => {
+      window.removeEventListener('lifehut_orders_updated', handleOrdersUpdated);
+      window.removeEventListener('storage', handleOrdersUpdated);
+    };
   }, []);
 
   // Sync manual orders to localStorage for safety

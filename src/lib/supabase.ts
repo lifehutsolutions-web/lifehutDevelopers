@@ -903,13 +903,26 @@ export async function saveSupabaseHousePlan(plan: HousePlan): Promise<boolean> {
   // Update local storage immediately for fast UI feedback
   try {
     const current = (await fetchSupabaseHousePlans()) || defaultHousePlans;
-    const existsIndex = current.findIndex(p => p.id === plan.id || p.slug === plan.slug);
+    // Sanitize for localStorage to prevent quota exhaustion
+    const sanitizeForLocal = (p: HousePlan): HousePlan => {
+      if (p.cadPackageBase64 && p.cadPackageBase64.length > 50000) {
+        const copy = { ...p };
+        delete copy.cadPackageBase64;
+        return copy;
+      }
+      return p;
+    };
+
+    const sanitizedPlan = sanitizeForLocal(plan);
+    const sanitizedCurrent = current.map(sanitizeForLocal);
+
+    const existsIndex = sanitizedCurrent.findIndex(p => p.id === plan.id || p.slug === plan.slug);
     let updated: HousePlan[];
     if (existsIndex >= 0) {
-      updated = [...current];
-      updated[existsIndex] = plan;
+      updated = [...sanitizedCurrent];
+      updated[existsIndex] = sanitizedPlan;
     } else {
-      updated = [plan, ...current];
+      updated = [sanitizedPlan, ...sanitizedCurrent];
     }
     localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(updated));
   } catch (e) {

@@ -177,14 +177,14 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
   const [zipUploadError, setZipUploadError] = useState<string | null>(null);
   const [isDraggingZip, setIsDraggingZip] = useState(false);
 
-  // CAD ZIP upload handler
+  // CAD ZIP upload handler: stores uploaded ZIP directly in Supabase
   const handleZipFileSelect = async (file: File) => {
     setUploadingZip(true);
     setZipUploadError(null);
     try {
       const sizeMb = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
       
-      // Convert file to Base64 for server storage
+      // Convert file to Base64 for persistent Supabase storage
       const reader = new FileReader();
       const base64Promise = new Promise<string>((resolve, reject) => {
         reader.onload = () => resolve(reader.result as string);
@@ -193,11 +193,16 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
       });
 
       const fileBase64 = await base64Promise;
+      
+      // Store Base64 directly so that handleSave writes it into Supabase cad_package_zip_url
+      setFormCadPackageZipUrl(fileBase64);
       setFormCadPackageBase64(fileBase64);
+      setFormCadPackageFileName(file.name);
+      setFormCadPackageSize(sizeMb);
 
-      // 1. Try Express server upload endpoint
+      // Also cache to Express server disk so local server can stream it fast
       try {
-        const res = await fetch('/api/upload-cad-zip', {
+        await fetch('/api/upload-cad-zip', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -206,43 +211,51 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
             planId: editingId || undefined
           })
         });
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.url) {
-            setFormCadPackageZipUrl(data.url);
-            setFormCadPackageFileName(data.fileName || file.name);
-            setFormCadPackageSize(data.size || sizeMb);
-            setUploadingZip(false);
-            return;
-          }
-        }
       } catch (srvErr) {
-        console.warn('Server zip upload endpoint error, trying Supabase storage fallback:', srvErr);
+        console.warn('Server disk zip cache notice:', srvErr);
       }
-
-      // 2. Try Supabase storage
-      if (isSupabaseConfigured()) {
-        const supaResult = await uploadZipToSupabase(file);
-        if (supaResult && supaResult.url) {
-          setFormCadPackageZipUrl(supaResult.url);
-          setFormCadPackageFileName(supaResult.fileName);
-          setFormCadPackageSize(supaResult.size);
-          setUploadingZip(false);
-          return;
-        }
-      }
-
-      // 3. Fallback: Store locally as data URI
-      setFormCadPackageZipUrl(fileBase64);
-      setFormCadPackageFileName(file.name);
-      setFormCadPackageSize(sizeMb);
     } catch (err: any) {
       console.error('CAD Zip upload failed:', err);
-      setZipUploadError(err?.message || 'Failed to upload ZIP archive. Please verify file size.');
+      setZipUploadError(err?.message || 'Failed to read ZIP archive. Please verify file.');
     } finally {
       setUploadingZip(false);
     }
+  };
+
+  // Test download handler for attached ZIP
+  const handleDownloadTestZip = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!formCadPackageZipUrl) return;
+    const fileName = formCadPackageFileName || `${formPlanCode || 'HousePlan'}-CAD-Package.zip`;
+
+    if (formCadPackageZipUrl.startsWith('data:')) {
+      const arr = formCadPackageZipUrl.split(',');
+      const mime = arr[0].match(/:(.*?);/)?.[1] || 'application/zip';
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      const blob = new Blob([u8arr], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = formCadPackageZipUrl;
+    link.download = fileName;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Upload handlers
@@ -504,18 +517,22 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
       createdAt: new Date().toISOString().split('T')[0]
     };
 
-    // Save to Supabase and Local Storage
-    await saveSupabaseHousePlan(updatedPlan);
-
-    // Save to Express server
+    // 1. Save to Express server immediately
     try {
       await fetch('/api/house-plans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'upsert', plan: updatedPlan })
       });
-    } catch {
-      // safe fallback
+    } catch (srvErr) {
+      console.warn('Express server plan save notice:', srvErr);
+    }
+
+    // 2. Save to Supabase and Local Storage safely
+    try {
+      await saveSupabaseHousePlan(updatedPlan);
+    } catch (sbErr) {
+      console.warn('Supabase plan save notice:', sbErr);
     }
 
     setIsSaving(false);
@@ -1544,16 +1561,14 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <a
-                          href={formCadPackageZipUrl}
-                          download={formCadPackageFileName || 'CAD-Package.zip'}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          type="button"
+                          onClick={handleDownloadTestZip}
                           className="px-3 py-1.5 bg-white border border-slate-200 text-slate-700 hover:text-blue-700 text-xs font-semibold rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
                         >
                           <Download className="w-3.5 h-3.5" />
                           <span>Test Download</span>
-                        </a>
+                        </button>
                         <button
                           type="button"
                           onClick={() => zipFileInputRef.current?.click()}
