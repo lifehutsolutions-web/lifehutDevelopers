@@ -35,12 +35,16 @@ import {
   Lock,
   FileCode,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Copy,
+  Globe,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Breadcrumbs } from './Breadcrumbs';
 import { HousePlan, Settings, HousePlanOrder } from '../types';
 import { defaultHousePlans } from '../data/defaultHousePlans';
+import { findPlan, getPlanShareUrl } from '../lib/routing';
 
 interface HousePlansProps {
   housePlans?: HousePlan[];
@@ -118,19 +122,23 @@ export const HousePlans: React.FC<HousePlansProps> = ({
   const [areaRangeFilter, setAreaRangeFilter] = useState<string | 'all'>('all');
   const [vastuOnlyFilter, setVastuOnlyFilter] = useState(false);
 
-  // Copy share feedback
+  // Copy share feedback & Share Modal state
   const [copiedLink, setCopiedLink] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [sharePlanTarget, setSharePlanTarget] = useState<HousePlan | null>(null);
+  const [copiedSlugUrl, setCopiedSlugUrl] = useState(false);
+  const [copiedCodeUrl, setCopiedCodeUrl] = useState(false);
 
   // Sync external selected slug
   useEffect(() => {
-    if (selectedSlug !== currentSlug) {
+    if (selectedSlug !== undefined && selectedSlug !== currentSlug) {
       setCurrentSlug(selectedSlug);
     }
   }, [selectedSlug]);
 
   const activePlan = useMemo(() => {
     if (!currentSlug) return null;
-    return plans.find(p => p.slug === currentSlug || p.id === currentSlug) || null;
+    return findPlan(plans, currentSlug);
   }, [currentSlug, plans]);
 
   // Media carousel list for active plan: includes 3D Front Elevation, 2D Floor Plan Blueprint, and all gallery views
@@ -643,11 +651,24 @@ export const HousePlans: React.FC<HousePlansProps> = ({
   };
 
   // Handle selecting a plan
-  const handleSelectPlan = (slug: string | null) => {
-    setCurrentSlug(slug);
-    setActiveCarouselIndex(0);
-    if (onSelectPlan) {
-      onSelectPlan(slug);
+  const handleSelectPlan = (slugOrIdentifier: string | null) => {
+    if (slugOrIdentifier) {
+      const matched = findPlan(plans, slugOrIdentifier);
+      const targetSlug = matched?.slug || slugOrIdentifier;
+      setCurrentSlug(targetSlug);
+      setActiveCarouselIndex(0);
+      if (onSelectPlan) {
+        onSelectPlan(targetSlug);
+      } else {
+        window.history.pushState({}, '', `/house-plans/${encodeURIComponent(targetSlug)}`);
+      }
+    } else {
+      setCurrentSlug(null);
+      if (onSelectPlan) {
+        onSelectPlan(null);
+      } else {
+        window.history.pushState({}, '', '/house-plans');
+      }
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -717,18 +738,26 @@ export const HousePlans: React.FC<HousePlansProps> = ({
     setVastuOnlyFilter(false);
   };
 
+  const openShareModal = (plan?: HousePlan) => {
+    const target = plan || activePlan;
+    if (!target) return;
+    setSharePlanTarget(target);
+    const seoUrl = getPlanShareUrl(target, 'seo');
+    try {
+      navigator.clipboard.writeText(seoUrl);
+    } catch {}
+    setCopiedLink(true);
+    setCopiedSlugUrl(true);
+    setTimeout(() => {
+      setCopiedLink(false);
+      setCopiedSlugUrl(false);
+    }, 2500);
+    setIsShareModalOpen(true);
+  };
+
   const handleShare = () => {
-    const url = window.location.href;
-    if (navigator.share) {
-      navigator.share({
-        title: activePlan ? activePlan.title : "House Plans Collection | Lifehut Developers",
-        url
-      }).catch(() => {});
-    } else {
-      navigator.clipboard.writeText(url);
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
-    }
+    if (!activePlan) return;
+    openShareModal(activePlan);
   };
 
   const handleCustomizationSubmit = async (e: React.FormEvent) => {
@@ -925,6 +954,38 @@ export const HousePlans: React.FC<HousePlansProps> = ({
                       <strong className="text-amber-950 font-mono font-bold">{activePlan.builtUpArea} sq.ft</strong>
                     </div>
                   </div>
+
+                  {/* SEO Product-Specific URL Badge */}
+                  <div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-slate-100">
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono text-slate-700 max-w-full">
+                      <Globe className="w-3.5 h-3.5 text-blue-700 flex-shrink-0" />
+                      <span className="text-slate-400 font-sans text-[11px] font-semibold">SEO URL:</span>
+                      <span className="text-blue-900 font-bold truncate max-w-[200px] sm:max-w-xs md:max-w-md">
+                        https://lifehutdevelopers.com/house-plans/{activePlan.slug || activePlan.planCode}
+                      </span>
+                      <button
+                        onClick={() => {
+                          const seoUrl = getPlanShareUrl(activePlan, 'seo');
+                          try {
+                            navigator.clipboard.writeText(seoUrl);
+                          } catch {}
+                          setCopiedLink(true);
+                          setTimeout(() => setCopiedLink(false), 2500);
+                        }}
+                        className="p-1 hover:bg-slate-200/80 rounded text-blue-700 transition-colors cursor-pointer flex-shrink-0"
+                        title="Copy unique SEO product URL"
+                      >
+                        {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => openShareModal(activePlan)}
+                      className="text-xs text-blue-700 font-bold hover:underline cursor-pointer flex items-center gap-1 px-1 py-1"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                      <span>Share Links</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Quick Action Buttons */}
@@ -938,7 +999,7 @@ export const HousePlans: React.FC<HousePlansProps> = ({
                     <span>{copiedLink ? 'Link Copied!' : 'Share Plan'}</span>
                   </button>
                   <a
-                    href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Hello Lifehut Developers, I am interested in House Plan ${activePlan.planCode} (${activePlan.title}). Please share floor plan details and cost breakdown for my plot.`)}`}
+                    href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Hello Lifehut Developers, I am interested in House Plan ${activePlan.planCode} (${activePlan.title}). Plan link: https://lifehutdevelopers.com/house-plans/${activePlan.slug || activePlan.planCode} . Please share floor plan details and cost breakdown for my plot.`)}`}
                     target="_blank"
                     rel="noreferrer"
                     className="px-4 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#20ba59] text-white text-xs font-display font-bold flex items-center gap-2 shadow-soft hover:shadow-card transition-all"
@@ -1869,21 +1930,30 @@ export const HousePlans: React.FC<HousePlansProps> = ({
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            onClick={() => handleSelectPlan(plan.slug)}
-                            className="py-2.5 px-3 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs shadow-soft transition-colors cursor-pointer flex items-center justify-center gap-1"
-                          >
-                            <span>View Floor Plan</span>
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </button>
+                        <div className="flex items-center gap-2">
+                          <div className="grid grid-cols-2 gap-2 flex-grow">
+                            <button
+                              onClick={() => handleSelectPlan(plan.slug)}
+                              className="py-2.5 px-3 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs shadow-soft transition-colors cursor-pointer flex items-center justify-center gap-1"
+                            >
+                              <span>View Floor Plan</span>
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
 
+                            <button
+                              onClick={() => openCadDownloadModal(plan)}
+                              className="py-2.5 px-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 font-semibold text-xs border border-blue-200 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                              <Download className="w-3.5 h-3.5 text-blue-700" />
+                              <span>CAD &amp; PDF (₹{plan.cadPackagePrice || 999})</span>
+                            </button>
+                          </div>
                           <button
-                            onClick={() => openCadDownloadModal(plan)}
-                            className="py-2.5 px-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 font-semibold text-xs border border-blue-200 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                            onClick={() => openShareModal(plan)}
+                            className="p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition-colors cursor-pointer flex items-center justify-center shadow-soft flex-shrink-0"
+                            title="Share this house plan"
                           >
-                            <Download className="w-3.5 h-3.5 text-blue-700" />
-                            <span>CAD &amp; PDF (₹{plan.cadPackagePrice || 999})</span>
+                            <Share2 className="w-4 h-4 text-blue-700" />
                           </button>
                         </div>
                       </div>
@@ -2494,6 +2564,245 @@ export const HousePlans: React.FC<HousePlansProps> = ({
             </div>
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* ======================= UNIQUE PRODUCT SEO SHARE MODAL ======================= */}
+      <AnimatePresence>
+        {isShareModalOpen && (sharePlanTarget || activePlan) && (() => {
+          const planToShare = sharePlanTarget || activePlan!;
+          const seoUrl = getPlanShareUrl(planToShare, 'seo');
+          const codeUrl = getPlanShareUrl(planToShare, 'code');
+          const shareTitle = `${planToShare.title} (${planToShare.planCode}) | Lifehut Developers`;
+          const shareText = `Check out this ${planToShare.builtUpArea} sq.ft, ${planToShare.bedrooms} BHK house plan (${planToShare.planCode}) by Lifehut Developers Chennai:`;
+
+          const shareOnWhatsApp = () => {
+            const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(`${shareText}\n${seoUrl}`)}`;
+            window.open(waUrl, '_blank');
+          };
+
+          const shareOnTwitter = () => {
+            const twUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareTitle)}&url=${encodeURIComponent(seoUrl)}`;
+            window.open(twUrl, '_blank');
+          };
+
+          const shareOnFacebook = () => {
+            const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(seoUrl)}`;
+            window.open(fbUrl, '_blank');
+          };
+
+          const shareOnPinterest = () => {
+            const pinUrl = `https://pinterest.com/pin/create/button/?url=${encodeURIComponent(seoUrl)}&media=${encodeURIComponent(planToShare.elevationImage)}&description=${encodeURIComponent(shareTitle)}`;
+            window.open(pinUrl, '_blank');
+          };
+
+          const shareOnLinkedIn = () => {
+            const liUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(seoUrl)}`;
+            window.open(liUrl, '_blank');
+          };
+
+          const shareViaEmail = () => {
+            const mailUrl = `mailto:?subject=${encodeURIComponent(shareTitle)}&body=${encodeURIComponent(`${shareText}\n\n${seoUrl}\n\nPlan Details:\n- Code: ${planToShare.planCode}\n- Built-up Area: ${planToShare.builtUpArea} sq.ft\n- Configuration: ${planToShare.bedrooms} BHK, ${planToShare.bathrooms} Baths\n- Facing: ${planToShare.facing}\n- Dimensions: ${planToShare.plotDimensions}`)}`;
+            window.location.href = mailUrl;
+          };
+
+          const handleNativeShare = async () => {
+            if (navigator.share) {
+              try {
+                await navigator.share({
+                  title: shareTitle,
+                  text: shareText,
+                  url: seoUrl
+                });
+              } catch {}
+            }
+          };
+
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+              onClick={() => setIsShareModalOpen(false)}
+            >
+              <div
+                className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-slate-200 relative my-8 text-left"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Close Button */}
+                <button
+                  onClick={() => setIsShareModalOpen(false)}
+                  className="absolute top-5 right-5 p-2 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                {/* Header */}
+                <div className="flex items-center gap-3 mb-5 pr-8">
+                  <div className="w-11 h-11 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center border border-blue-100 flex-shrink-0">
+                    <Share2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold font-mono uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                      {planToShare.planCode}
+                    </span>
+                    <h3 className="text-base font-bold font-display text-slate-900 line-clamp-1 mt-0.5">
+                      {planToShare.title}
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Share this unique product-specific URL with clients or friends
+                    </p>
+                  </div>
+                </div>
+
+                {/* Option 1: SEO Friendly Product Name URL */}
+                <div className="mb-3.5 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Globe className="w-3.5 h-3.5 text-blue-700" />
+                      <span>SEO Friendly Product URL</span>
+                    </label>
+                    <span className="text-[10px] uppercase font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                      Recommended
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={seoUrl}
+                      className="w-full text-xs font-mono px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-800 outline-none select-all"
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(seoUrl);
+                        setCopiedSlugUrl(true);
+                        setTimeout(() => setCopiedSlugUrl(false), 2500);
+                      }}
+                      className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer flex-shrink-0 ${
+                        copiedSlugUrl
+                          ? 'bg-emerald-600 text-white shadow-soft'
+                          : 'bg-blue-700 hover:bg-blue-800 text-white shadow-soft'
+                      }`}
+                    >
+                      {copiedSlugUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedSlugUrl ? 'Copied!' : 'Copy'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Option 2: Short Product Code URL */}
+                <div className="mb-5 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <FileCode className="w-3.5 h-3.5 text-indigo-700" />
+                      <span>Product Code Quick Link</span>
+                    </label>
+                    <span className="text-[10px] uppercase font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                      Short Link
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={codeUrl}
+                      className="w-full text-xs font-mono px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-800 outline-none select-all"
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(codeUrl);
+                        setCopiedCodeUrl(true);
+                        setTimeout(() => setCopiedCodeUrl(false), 2500);
+                      }}
+                      className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer flex-shrink-0 ${
+                        copiedCodeUrl
+                          ? 'bg-emerald-600 text-white shadow-soft'
+                          : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-soft'
+                      }`}
+                    >
+                      {copiedCodeUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedCodeUrl ? 'Copied!' : 'Copy'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Social Share Buttons */}
+                <div className="mb-4">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2.5">
+                    Share directly via:
+                  </span>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                    <button
+                      onClick={shareOnWhatsApp}
+                      className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors cursor-pointer group"
+                      title="Share to WhatsApp"
+                    >
+                      <MessageCircle className="w-5 h-5 text-emerald-600 group-hover:scale-110 transition-transform mb-1" />
+                      <span className="text-[11px] font-bold">WhatsApp</span>
+                    </button>
+
+                    <button
+                      onClick={shareOnFacebook}
+                      className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors cursor-pointer group"
+                      title="Share to Facebook"
+                    >
+                      <span className="w-5 h-5 text-blue-600 font-extrabold text-sm group-hover:scale-110 transition-transform mb-1 flex items-center justify-center">f</span>
+                      <span className="text-[11px] font-bold">Facebook</span>
+                    </button>
+
+                    <button
+                      onClick={shareOnTwitter}
+                      className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 transition-colors cursor-pointer group"
+                      title="Share to X"
+                    >
+                      <span className="w-5 h-5 text-slate-900 font-extrabold text-sm group-hover:scale-110 transition-transform mb-1 flex items-center justify-center">𝕏</span>
+                      <span className="text-[11px] font-bold">Twitter</span>
+                    </button>
+
+                    <button
+                      onClick={shareOnPinterest}
+                      className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 transition-colors cursor-pointer group"
+                      title="Pin on Pinterest"
+                    >
+                      <span className="w-5 h-5 text-rose-600 font-extrabold text-sm group-hover:scale-110 transition-transform mb-1 flex items-center justify-center">P</span>
+                      <span className="text-[11px] font-bold">Pinterest</span>
+                    </button>
+
+                    <button
+                      onClick={shareOnLinkedIn}
+                      className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 transition-colors cursor-pointer group"
+                      title="Share to LinkedIn"
+                    >
+                      <span className="w-5 h-5 text-sky-700 font-extrabold text-sm group-hover:scale-110 transition-transform mb-1 flex items-center justify-center">in</span>
+                      <span className="text-[11px] font-bold">LinkedIn</span>
+                    </button>
+
+                    <button
+                      onClick={shareViaEmail}
+                      className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-colors cursor-pointer group"
+                      title="Share via Email"
+                    >
+                      <Send className="w-5 h-5 text-amber-600 group-hover:scale-110 transition-transform mb-1" />
+                      <span className="text-[11px] font-bold">Email</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Device native share if available */}
+                {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+                  <button
+                    onClick={handleNativeShare}
+                    className="w-full py-2.5 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer mt-1"
+                  >
+                    <Share2 className="w-4 h-4 text-blue-700" />
+                    <span>Open Device Share Menu</span>
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
 
     </div>

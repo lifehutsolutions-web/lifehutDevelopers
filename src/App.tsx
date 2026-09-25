@@ -15,6 +15,7 @@ import { FloatingQuickActions } from './components/FloatingQuickActions';
 import { Service, Project, Blog, Enquiry, Settings, HousePlan } from './types';
 import { defaultServices, defaultProjects, defaultBlogs, defaultSettings } from './data/defaults';
 import { defaultHousePlans } from './data/defaultHousePlans';
+import { findPlan } from './lib/routing';
 import { 
   isSupabaseConfigured, 
   fetchSupabaseServices, 
@@ -38,7 +39,16 @@ export default function App() {
   const [services, setServices] = useState<Service[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [blogs, setBlogs] = useState<Blog[]>([]);
-  const [housePlans, setHousePlans] = useState<HousePlan[]>([]);
+  const [housePlans, setHousePlans] = useState<HousePlan[]>(() => {
+    try {
+      const local = localStorage.getItem('lifehut_local_house_plans');
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return defaultHousePlans;
+  });
   const [selectedPlanSlug, setSelectedPlanSlug] = useState<string | null>(null);
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -257,26 +267,67 @@ export default function App() {
           keywords={settings?.seoKeywords || "residential building construction company, turnkey house builders chennai, villa contractors"}
         />
       )}
-      {activeTab === 'house-plans' && (
-        <SEO
-          title={
-            selectedPlanSlug && housePlans.find(p => p.slug === selectedPlanSlug)
-              ? `${housePlans.find(p => p.slug === selectedPlanSlug)?.title} | Turnkey House Plans`
-              : "House Plans in Chennai | 100% Vastu Architectural Floor Designs"
-          }
-          description={
-            selectedPlanSlug && housePlans.find(p => p.slug === selectedPlanSlug)
-              ? `${housePlans.find(p => p.slug === selectedPlanSlug)?.description}`
-              : "Explore architect-drafted house plans in Chennai. 1500 sq.ft, 1800 sq.ft, duplex villa floor plans, 100% Vastu compliant with estimated turnkey construction budgets."
-          }
-          keywords={
-            selectedPlanSlug && housePlans.find(p => p.slug === selectedPlanSlug)
-              ? `${housePlans.find(p => p.slug === selectedPlanSlug)?.seoMeta?.keywords || "house plans chennai"}`
-              : "house plans chennai, 1500 sqft house plan, 1 storey house design, duplex floor plan chennai, vastu house plans"
-          }
-          canonicalPath={selectedPlanSlug ? `/house-plans/${selectedPlanSlug}` : "/house-plans"}
-        />
-      )}
+      {activeTab === 'house-plans' && (() => {
+        const activePlanObj = selectedPlanSlug ? findPlan(housePlans, selectedPlanSlug) : null;
+        if (activePlanObj) {
+          const canonicalSlug = activePlanObj.slug || activePlanObj.planCode;
+          const canonicalUrl = `https://lifehutdevelopers.com/house-plans/${encodeURIComponent(canonicalSlug)}`;
+          const richDescription = activePlanObj.description || `${activePlanObj.title} - ${activePlanObj.builtUpArea} sq.ft, ${activePlanObj.bedrooms} BHK, ${activePlanObj.facing}-facing 100% Vastu compliant floor plan in Chennai with turnkey execution costs.`;
+          return (
+            <SEO
+              title={`${activePlanObj.title} (${activePlanObj.planCode}) | Lifehut Developers`}
+              description={richDescription}
+              keywords={`${activePlanObj.planCode}, ${activePlanObj.title}, house plans chennai, ${activePlanObj.builtUpArea} sqft house plan, ${activePlanObj.bedrooms} bhk floor plan, ${activePlanObj.facing} facing, vastu floor plans`}
+              canonicalPath={`/house-plans/${encodeURIComponent(canonicalSlug)}`}
+              url={canonicalUrl}
+              image={activePlanObj.elevationImage}
+              type="product"
+              schema={{
+                "@context": "https://schema.org",
+                "@type": "Product",
+                "name": activePlanObj.title,
+                "sku": activePlanObj.planCode,
+                "mpn": activePlanObj.planCode,
+                "image": [activePlanObj.elevationImage, activePlanObj.floorPlanImage].filter(Boolean),
+                "description": richDescription,
+                "brand": {
+                  "@type": "Brand",
+                  "name": "Lifehut Developers"
+                },
+                "offers": {
+                  "@type": "Offer",
+                  "price": activePlanObj.cadPackagePrice || 999,
+                  "priceCurrency": "INR",
+                  "availability": "https://schema.org/InStock",
+                  "url": canonicalUrl,
+                  "seller": {
+                    "@type": "Organization",
+                    "name": "Lifehut Developers",
+                    "telephone": phone,
+                    "address": address
+                  }
+                }
+              }}
+            />
+          );
+        }
+        return (
+          <SEO
+            title="House Plans in Chennai | 100% Vastu Architectural Floor Designs"
+            description="Explore architect-drafted house plans in Chennai. 1000 to 3200 sq.ft single-storey, duplex & triplex villa floor plans, 100% Vastu compliant with estimated turnkey construction budgets."
+            keywords="house plans chennai, 1500 sqft house plan, 1 storey house design, duplex floor plan chennai, vastu house plans"
+            canonicalPath="/house-plans"
+            url="https://lifehutdevelopers.com/house-plans"
+            schema={{
+              "@context": "https://schema.org",
+              "@type": "CollectionPage",
+              "name": "Architectural House Plans Collection | Lifehut Developers",
+              "description": "Browse vastu-compliant architectural house plans and villa designs in Chennai.",
+              "url": "https://lifehutdevelopers.com/house-plans"
+            }}
+          />
+        );
+      })()}
       {activeTab === 'services' && (
         <SEO
           title="Services | High-End Residential Construction"
@@ -369,7 +420,16 @@ export default function App() {
               <HousePlans
                 housePlans={housePlans}
                 setActiveTab={setActiveTab}
+                selectedSlug={selectedPlanSlug}
                 initialSelectedSlug={selectedPlanSlug}
+                onSelectPlan={(slug) => {
+                  setSelectedPlanSlug(slug);
+                  if (slug) {
+                    window.history.pushState({}, '', `/house-plans/${encodeURIComponent(slug)}`);
+                  } else {
+                    window.history.pushState({}, '', '/house-plans');
+                  }
+                }}
                 phone={phone}
                 settings={settings}
               />

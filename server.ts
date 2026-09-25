@@ -1720,9 +1720,14 @@ Sitemap: https://lifehutdevelopers.com/sitemap.xml`);
       { loc: '/contact', changefreq: 'monthly', priority: '0.8' },
     ];
 
-    // Add house plans
+    // Add house plans (both SEO slug and Product Code format)
     (db.housePlans || defaultHousePlans).forEach(p => {
-      urls.push({ loc: `/house-plans/${p.slug}`, changefreq: 'weekly', priority: '0.8' });
+      if (p.slug) {
+        urls.push({ loc: `/house-plans/${p.slug}`, changefreq: 'weekly', priority: '0.9' });
+      }
+      if (p.planCode) {
+        urls.push({ loc: `/house-plans/${p.planCode}`, changefreq: 'weekly', priority: '0.8' });
+      }
     });
 
     // Add blogs

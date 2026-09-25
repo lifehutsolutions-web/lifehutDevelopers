@@ -164,6 +164,11 @@ export function navigateToRoute(route: AppRoute, replace = false): void {
 
 /**
  * Robust matcher for house plans by slug, id, planCode, or title.
+ * Supports:
+ * - SEO-friendly slug: /house-plans/duplex-house-at-1000-sqft-plot
+ * - Product Code (case-insensitive): /house-plans/LH-HP-0002 or /house-plans/lh-hp-0002
+ * - Normalized codes: /house-plans/lhhp0002
+ * - Plan ID or title
  */
 export function findPlan(plans: HousePlan[], identifier: string | null | undefined): HousePlan | null {
   if (!identifier || !plans || plans.length === 0) return null;
@@ -171,31 +176,54 @@ export function findPlan(plans: HousePlan[], identifier: string | null | undefin
   const rawDecoded = decodeURIComponent(identifier).trim();
   const lowerRaw = rawDecoded.toLowerCase();
   const normalized = normalizeSlug(rawDecoded);
+  const cleanCode = lowerRaw.replace(/[^a-z0-9]/g, '');
 
-  // 1. Exact matches on slug, id, planCode, title
+  // 1. Exact matches on slug, planCode, id, title
   for (const plan of plans) {
     if (plan.slug && plan.slug.toLowerCase() === lowerRaw) return plan;
-    if (plan.id && plan.id.toLowerCase() === lowerRaw) return plan;
     if (plan.planCode && plan.planCode.toLowerCase() === lowerRaw) return plan;
+    if (plan.id && plan.id.toLowerCase() === lowerRaw) return plan;
     if (plan.title && plan.title.toLowerCase() === lowerRaw) return plan;
   }
 
-  // 2. Normalized slug comparisons
+  // 2. Normalized slug and planCode comparisons
   for (const plan of plans) {
     if (plan.slug && normalizeSlug(plan.slug) === normalized) return plan;
     if (plan.title && normalizeSlug(plan.title) === normalized) return plan;
+    if (plan.planCode && normalizeSlug(plan.planCode) === normalized) return plan;
+    if (plan.planCode && plan.planCode.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanCode) return plan;
     if (plan.id && normalizeSlug(plan.id) === normalized) return plan;
   }
 
-  // 3. Normalized substring inclusion (e.g. "28x41" and "5bhk")
+  // 3. Normalized substring inclusion (e.g. "28x41", "5bhk", or partial title slug)
   for (const plan of plans) {
-    const planTitleNorm = normalizeSlug(plan.title);
-    if (planTitleNorm.includes(normalized) || (normalized.length > 5 && normalized.includes(planTitleNorm))) {
-      return plan;
-    }
+    const cleanNorm = normalized.replace(/[^a-z0-9]/g, '');
+    const titleClean = normalizeSlug(plan.title).replace(/[^a-z0-9]/g, '');
+    const slugClean = normalizeSlug(plan.slug || '').replace(/[^a-z0-9]/g, '');
+    if (titleClean && cleanNorm && (titleClean.includes(cleanNorm) || cleanNorm.includes(titleClean))) return plan;
+    if (slugClean && cleanNorm && (slugClean.includes(cleanNorm) || cleanNorm.includes(slugClean))) return plan;
   }
 
   return null;
+}
+
+/**
+ * Returns the shareable URL for a house plan.
+ * format:
+ * - 'seo': https://lifehutdevelopers.com/house-plans/<product-slug>
+ * - 'code': https://lifehutdevelopers.com/house-plans/<product-code>
+ * - 'current': <origin>/house-plans/<product-slug>
+ */
+export function getPlanShareUrl(plan: HousePlan, format: 'seo' | 'code' | 'current' = 'seo'): string {
+  const slug = plan.slug || normalizeSlug(plan.title) || plan.planCode.toLowerCase();
+  const baseUrl = format === 'current' && typeof window !== 'undefined'
+    ? window.location.origin
+    : 'https://lifehutdevelopers.com';
+
+  if (format === 'code') {
+    return `${baseUrl}/house-plans/${encodeURIComponent(plan.planCode)}`;
+  }
+  return `${baseUrl}/house-plans/${encodeURIComponent(slug)}`;
 }
 
 /**

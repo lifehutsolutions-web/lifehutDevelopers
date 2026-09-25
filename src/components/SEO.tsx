@@ -6,6 +6,10 @@ interface SEOProps {
   keywords?: string;
   canonicalPath?: string;
   noindex?: boolean;
+  image?: string;
+  url?: string;
+  type?: string;
+  schema?: Record<string, any> | null;
 }
 
 export const SEO: React.FC<SEOProps> = ({
@@ -13,57 +17,76 @@ export const SEO: React.FC<SEOProps> = ({
   description,
   keywords,
   canonicalPath = "",
-  noindex = false
+  noindex = false,
+  image,
+  url,
+  type = 'website',
+  schema = null
 }) => {
   useEffect(() => {
     // Dynamic document title update
-    document.title = title.includes('Lifehut') ? title : `${title} | Lifehut Developers`;
+    const formattedTitle = title.includes('Lifehut') ? title : `${title} | Lifehut Developers`;
+    document.title = formattedTitle;
 
-    // Dynamic description update
-    let metaDesc = document.querySelector('meta[name="description"]');
-    if (!metaDesc) {
-      metaDesc = document.createElement('meta');
-      metaDesc.setAttribute('name', 'description');
-      document.head.appendChild(metaDesc);
-    }
-    metaDesc.setAttribute('content', description);
-
-    // Dynamic keywords update
-    if (keywords) {
-      let metaKeywords = document.querySelector('meta[name="keywords"]');
-      if (!metaKeywords) {
-        metaKeywords = document.createElement('meta');
-        metaKeywords.setAttribute('name', 'keywords');
-        document.head.appendChild(metaKeywords);
+    // Helper to get or create meta tag
+    const setMetaTag = (attrName: 'name' | 'property', attrValue: string, content: string) => {
+      let meta = document.querySelector(`meta[${attrName}="${attrValue}"]`);
+      if (!meta) {
+        meta = document.createElement('meta');
+        meta.setAttribute(attrName, attrValue);
+        document.head.appendChild(meta);
       }
-      metaKeywords.setAttribute('content', keywords);
-    }
+      meta.setAttribute('content', content);
+    };
 
-    // Dynamic canonical link update
+    // Standard meta tags
+    setMetaTag('name', 'description', description);
+    if (keywords) {
+      setMetaTag('name', 'keywords', keywords);
+    }
+    setMetaTag('name', 'robots', noindex ? 'noindex, nofollow' : 'index, follow');
+
+    // Canonical link
+    const canonicalHref = url || `https://lifehutdevelopers.com${canonicalPath}`;
     let canonical = document.querySelector('link[rel="canonical"]');
     if (!canonical) {
       canonical = document.createElement('link');
       canonical.setAttribute('rel', 'canonical');
       document.head.appendChild(canonical);
     }
-    canonical.setAttribute('href', `https://lifehutdevelopers.com${canonicalPath}`);
+    canonical.setAttribute('href', canonicalHref);
 
-    // Dynamic robots tag for indexing
-    let metaRobots = document.querySelector('meta[name="robots"]');
-    if (!metaRobots) {
-      metaRobots = document.createElement('meta');
-      metaRobots.setAttribute('name', 'robots');
-      document.head.appendChild(metaRobots);
+    // Open Graph meta tags
+    setMetaTag('property', 'og:title', formattedTitle);
+    setMetaTag('property', 'og:description', description);
+    setMetaTag('property', 'og:url', canonicalHref);
+    setMetaTag('property', 'og:type', type);
+    if (image) {
+      setMetaTag('property', 'og:image', image);
     }
-    metaRobots.setAttribute('content', noindex ? 'noindex, nofollow' : 'index, follow');
 
-    // Dynamic Open Graph tags
-    let ogTitle = document.querySelector('meta[property="og:title"]');
-    if (ogTitle) ogTitle.setAttribute('content', title);
+    // Twitter Card meta tags
+    setMetaTag('name', 'twitter:card', 'summary_large_image');
+    setMetaTag('name', 'twitter:title', formattedTitle);
+    setMetaTag('name', 'twitter:description', description);
+    if (image) {
+      setMetaTag('name', 'twitter:image', image);
+    }
 
-    let ogDesc = document.querySelector('meta[property="og:description"]');
-    if (ogDesc) ogDesc.setAttribute('content', description);
-  }, [title, description, keywords, canonicalPath, noindex]);
+    // Schema.org JSON-LD Structured Data
+    let schemaScript = document.querySelector('#seo-structured-data') as HTMLScriptElement | null;
+    if (schema) {
+      if (!schemaScript) {
+        schemaScript = document.createElement('script');
+        schemaScript.id = 'seo-structured-data';
+        schemaScript.type = 'application/ld+json';
+        document.head.appendChild(schemaScript);
+      }
+      schemaScript.text = JSON.stringify(schema, null, 2);
+    } else if (schemaScript) {
+      schemaScript.remove();
+    }
+  }, [title, description, keywords, canonicalPath, noindex, image, url, type, schema]);
 
   return null;
 };
