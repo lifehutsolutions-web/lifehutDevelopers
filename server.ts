@@ -3,11 +3,105 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
+import { createClient } from '@supabase/supabase-js';
 import { CMSData, Service, Project, Blog, Testimonial, Enquiry, QuoteRequest, SiteSettings, Stats, HousePlan, HousePlanOrder } from './src/types';
-import { defaultHousePlans } from './src/data/defaultHousePlans';
 
 const PORT = 3000;
 const DB_FILE = path.join(process.cwd(), 'server_db.json');
+
+// Supabase server client
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://vkthcqceywhdlmjsvsze.supabase.co";
+const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable__eUGKx9jON0kZ1dVrBRmLw_-huhN1d7";
+const supabaseServer = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const isDemoHousePlan = (p: HousePlan | any): boolean => {
+  if (!p) return true;
+  const demoCodes = ['LH-HP-1500', 'LH-HP-1800', 'LH-HP-2400', 'LH-HP-1200', 'LH-HP-2100', 'LH-HP-3200', 'LH-HP-1000', 'LH-HP-2700'];
+  const demoIds = ['lh-hp-1500-single-storey', 'lh-hp-1800-duplex-villa', 'lh-hp-2400-luxury-villa', 'lh-hp-1200-single-storey', 'lh-hp-2100-duplex-villa', 'lh-hp-3200-triplex-residence', 'lh-hp-1000-budget-storey', 'lh-hp-2700-duplex-house'];
+  const code = (p.planCode || p.plan_code || '').trim();
+  const id = (p.id || '').trim();
+  return demoCodes.includes(code) || demoIds.includes(id);
+};
+
+async function syncHousePlansFromSupabase(): Promise<HousePlan[]> {
+  try {
+    const { data, error } = await supabaseServer
+      .from('house_plans')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (!error && data && data.length > 0) {
+      const plans: HousePlan[] = data
+        .filter(item => !isDemoHousePlan({ planCode: item.plan_code || item.planCode, id: item.id }))
+        .map(item => ({
+          id: item.id,
+          planCode: item.plan_code || item.planCode || 'LH-HP-0001',
+          title: item.title,
+          slug: item.slug,
+          floors: Number(item.floors) || 1,
+          floorsLabel: item.floors_label || item.floorsLabel || `${item.floors || 1} Storey`,
+          bedrooms: Number(item.bedrooms) || 3,
+          bathrooms: Number(item.bathrooms) || 3,
+          builtUpArea: Number(item.built_up_area || item.builtUpArea) || 1500,
+          plotDimensions: item.plot_dimensions || item.plotDimensions || "30' x 50'",
+          buildingDimensions: item.building_dimensions || item.buildingDimensions || undefined,
+          facing: item.facing || 'East',
+          vastuCompliant: item.vastu_compliant !== undefined ? Boolean(item.vastu_compliant) : true,
+          vastuScore: item.vastu_score || item.vastuScore || '100% Vastu Compliant',
+          vastuNotes: Array.isArray(item.vastu_notes || item.vastuNotes) ? (item.vastu_notes || item.vastuNotes) : [],
+          style: item.style || 'Contemporary Modern',
+          carParking: Number(item.car_parking || item.carParking) || 1,
+          estimatedCostRange: item.estimated_cost_range || item.estimatedCostRange || '₹30L - ₹35L',
+          costPerSqft: item.cost_per_sqft || item.costPerSqft || '₹2,200 / sq.ft',
+          elevationImage: item.elevation_image || item.elevationImage || '',
+          floorPlanImage: item.floor_plan_image || item.floorPlanImage || '',
+          galleryImages: Array.isArray(item.gallery_images || item.galleryImages) ? (item.gallery_images || item.galleryImages) : [],
+          description: item.description || '',
+          roomDimensions: Array.isArray(item.room_dimensions || item.roomDimensions) ? (item.room_dimensions || item.roomDimensions) : [],
+          features: Array.isArray(item.features) ? item.features : [],
+          cadPackageZipUrl: item.cad_package_zip_url || item.cadPackageZipUrl || '',
+          cadPackageFileName: item.cad_package_file_name || item.cadPackageFileName || '',
+          cadPackageSize: item.cad_package_size || item.cadPackageSize || '',
+          cadPackagePrice: item.cad_package_price !== undefined ? Number(item.cad_package_price) : 999,
+          cadPackageIncludes: Array.isArray(item.cad_package_includes || item.cadPackageIncludes) ? (item.cad_package_includes || item.cadPackageIncludes) : undefined,
+          seoMeta: item.seo_meta || item.seoMeta || undefined,
+          isFeatured: Boolean(item.is_featured || item.isFeatured),
+          isActive: item.is_active !== undefined ? Boolean(item.is_active) : true,
+          createdAt: item.created_at || item.createdAt
+        }));
+
+      if (plans.length > 0) {
+        const db = readDB();
+        db.housePlans = plans;
+        writeDB(db);
+        return plans;
+      }
+    }
+
+    // Fallback: check Supabase settings.stats.house_plans
+    const { data: stData } = await supabaseServer
+      .from('settings')
+      .select('stats')
+      .limit(1);
+
+    if (stData && stData[0]?.stats?.house_plans) {
+      const storedPlans = stData[0].stats.house_plans;
+      if (Array.isArray(storedPlans) && storedPlans.length > 0) {
+        const clean = storedPlans.filter(p => !isDemoHousePlan(p));
+        if (clean.length > 0) {
+          const db = readDB();
+          db.housePlans = clean;
+          writeDB(db);
+          return clean;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Server] Supabase house plans sync error:', err);
+  }
+  const db = readDB();
+  return (db.housePlans || []).filter(p => !isDemoHousePlan(p));
+}
 
 // Initialize with Premium Defaults
 const defaultSettings: SiteSettings = {
@@ -336,7 +430,7 @@ const initialCMSData: CMSData = {
   services: defaultServices,
   projects: defaultProjects,
   blogs: defaultBlogs,
-  housePlans: defaultHousePlans,
+  housePlans: [],
   testimonials: defaultTestimonials,
   stats: defaultStats,
   enquiries: [],
@@ -353,10 +447,6 @@ function readDB(): CMSData {
     }
     const raw = fs.readFileSync(DB_FILE, 'utf-8');
     const data: CMSData = JSON.parse(raw);
-    if (!data.housePlans || data.housePlans.length === 0) {
-      data.housePlans = defaultHousePlans;
-      writeDB(data);
-    }
     return data;
   } catch (err) {
     console.error("Failed to read database file. Returning defaults.", err);
@@ -428,20 +518,27 @@ async function startServer() {
     res.json(db.blogs || []);
   });
 
-  app.get('/api/house-plans', (req, res) => {
-    const db = readDB();
-    if (!db.housePlans || db.housePlans.length === 0) {
-      db.housePlans = defaultHousePlans;
-      writeDB(db);
+  app.get('/api/house-plans', async (req, res) => {
+    try {
+      const plans = await syncHousePlansFromSupabase();
+      return res.json(plans);
+    } catch {
+      const db = readDB();
+      return res.json((db.housePlans || []).filter(p => !isDemoHousePlan(p)));
     }
-    res.json(db.housePlans || []);
   });
 
   app.get('/api/house-plans/:slugOrId', (req, res) => {
     const { slugOrId } = req.params;
     const db = readDB();
-    const plans = db.housePlans || defaultHousePlans;
-    const plan = plans.find(p => p.slug === slugOrId || p.id === slugOrId);
+    const plans = (db.housePlans || []).filter(p => !isDemoHousePlan(p));
+    const lower = decodeURIComponent(slugOrId).toLowerCase();
+    const plan = plans.find(p => 
+      p.slug?.toLowerCase() === lower || 
+      p.id?.toLowerCase() === lower ||
+      p.planCode?.toLowerCase() === lower ||
+      p.planCode?.toLowerCase().replace(/[^a-z0-9]/g, '') === lower.replace(/[^a-z0-9]/g, '')
+    );
     if (plan) {
       return res.json({ success: true, plan });
     }
@@ -765,7 +862,7 @@ async function startServer() {
   // House Plans CRUD
   app.post('/api/house-plans', (req, res) => {
     const db = readDB();
-    if (!db.housePlans) db.housePlans = [...defaultHousePlans];
+    if (!db.housePlans) db.housePlans = [];
 
     const { action, plan } = req.body;
     const targetPlan = plan || req.body;
@@ -808,7 +905,7 @@ async function startServer() {
   app.put('/api/house-plans/:id', (req, res) => {
     const { id } = req.params;
     const db = readDB();
-    if (!db.housePlans) db.housePlans = [...defaultHousePlans];
+    if (!db.housePlans) db.housePlans = [];
     const idx = db.housePlans.findIndex(p => p.id === id);
     if (idx !== -1) {
       db.housePlans[idx] = { ...db.housePlans[idx], ...req.body };
@@ -821,7 +918,7 @@ async function startServer() {
   app.delete('/api/house-plans/:id', (req, res) => {
     const { id } = req.params;
     const db = readDB();
-    if (!db.housePlans) db.housePlans = [...defaultHousePlans];
+    if (!db.housePlans) db.housePlans = [];
     db.housePlans = db.housePlans.filter(p => p.id !== id);
     writeDB(db);
     res.json({ success: true });
@@ -1072,7 +1169,7 @@ async function startServer() {
     try {
       const { planId, clientName, clientEmail, clientPhone, amount } = req.body;
       const db = readDB();
-      const plans = db.housePlans || defaultHousePlans;
+      const plans = (db.housePlans || []).filter(p => !isDemoHousePlan(p));
       const plan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId);
 
       const finalAmount = Number(amount) || plan?.cadPackagePrice || 999;
@@ -1209,7 +1306,7 @@ async function startServer() {
         });
       }
 
-      const plans = db.housePlans || defaultHousePlans;
+      const plans = (db.housePlans || []).filter(p => !isDemoHousePlan(p));
       const plan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId);
 
       // Record genuine verified purchase in db.enquiries for admin records
@@ -1294,7 +1391,7 @@ async function startServer() {
     try {
       const { planId, clientName, clientEmail, clientPhone, isFreePlan } = req.body;
       const db = readDB();
-      const plans = db.housePlans || defaultHousePlans;
+      const plans = (db.housePlans || []).filter(p => !isDemoHousePlan(p));
       const plan = plans.find(p => p.id === planId || p.slug === planId || p.planCode === planId);
 
       const price = plan?.cadPackagePrice !== undefined ? plan.cadPackagePrice : 999;
@@ -1399,7 +1496,7 @@ async function startServer() {
       }
 
       const db = readDB();
-      const plans = db.housePlans || defaultHousePlans;
+      const plans = (db.housePlans || []).filter(p => !isDemoHousePlan(p));
       const idLower = planId.toLowerCase();
       const plan = plans.find(p => 
         p.id === planId || 
@@ -1549,7 +1646,7 @@ async function startServer() {
   // Track house plan view counter
   app.post('/api/house-plans/:id/view', (req, res) => {
     const db = readDB();
-    const plans = db.housePlans || defaultHousePlans;
+    const plans = (db.housePlans || []).filter(p => !isDemoHousePlan(p));
     const plan = plans.find(p => p.id === req.params.id || p.slug === req.params.id || p.planCode === req.params.id);
     if (plan) {
       plan.views = (Number(plan.views) || 0) + 1;
@@ -1677,7 +1774,7 @@ async function startServer() {
       b.content.toLowerCase().includes(q) ||
       b.category.toLowerCase().includes(q)
     );
-    const matchedHousePlans = (db.housePlans || defaultHousePlans).filter(p =>
+    const matchedHousePlans = (db.housePlans || []).filter(p => !isDemoHousePlan(p)).filter(p =>
       p.title.toLowerCase().includes(q) ||
       p.planCode.toLowerCase().includes(q) ||
       p.description.toLowerCase().includes(q) ||
@@ -1721,7 +1818,7 @@ Sitemap: https://lifehutdevelopers.com/sitemap.xml`);
     ];
 
     // Add house plans (both SEO slug and Product Code format)
-    (db.housePlans || defaultHousePlans).forEach(p => {
+    (db.housePlans || []).filter(p => !isDemoHousePlan(p)).forEach(p => {
       if (p.slug) {
         urls.push({ loc: `/house-plans/${p.slug}`, changefreq: 'weekly', priority: '0.9' });
       }

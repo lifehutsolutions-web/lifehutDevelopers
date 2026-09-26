@@ -15,7 +15,7 @@ import { FloatingQuickActions } from './components/FloatingQuickActions';
 import { Service, Project, Blog, Enquiry, Settings, HousePlan } from './types';
 import { defaultServices, defaultProjects, defaultBlogs, defaultSettings } from './data/defaults';
 import { defaultHousePlans } from './data/defaultHousePlans';
-import { findPlan } from './lib/routing';
+import { findPlan, isDemoHousePlan } from './lib/routing';
 import { 
   isSupabaseConfigured, 
   fetchSupabaseServices, 
@@ -44,10 +44,13 @@ export default function App() {
       const local = localStorage.getItem('lifehut_local_house_plans');
       if (local) {
         const parsed = JSON.parse(local);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const nonDemo = parsed.filter(p => !isDemoHousePlan(p));
+          if (nonDemo.length > 0) return nonDemo;
+        }
       }
     } catch {}
-    return defaultHousePlans;
+    return [];
   });
   const [selectedPlanSlug, setSelectedPlanSlug] = useState<string | null>(null);
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
@@ -79,7 +82,26 @@ export default function App() {
         setServices(sbServices && sbServices.length > 0 ? sbServices : defaultServices);
         setProjects(sbProjects && sbProjects.length > 0 ? sbProjects : defaultProjects);
         setBlogs(blogData && blogData.length > 0 ? blogData : defaultBlogs);
-        setHousePlans(sbHousePlans && sbHousePlans.length > 0 ? sbHousePlans : defaultHousePlans);
+
+        // House plans strictly from Supabase / server, no default demo plans
+        let validHousePlans = (sbHousePlans || []).filter(p => !isDemoHousePlan(p));
+        if (validHousePlans.length === 0) {
+          try {
+            const hpRes = await fetch('/api/house-plans');
+            if (hpRes.ok) {
+              const serverPlans = await hpRes.json();
+              if (Array.isArray(serverPlans) && serverPlans.length > 0) {
+                validHousePlans = serverPlans.filter((p: any) => !isDemoHousePlan(p));
+              }
+            }
+          } catch {}
+        }
+        setHousePlans(validHousePlans);
+        if (validHousePlans.length > 0) {
+          try {
+            localStorage.setItem('lifehut_local_house_plans', JSON.stringify(validHousePlans));
+          } catch {}
+        }
         setEnquiries(sbEnquiries || []);
         setSettings(sbSettings || defaultSettings);
         setLoading(false);
@@ -126,10 +148,12 @@ export default function App() {
 
       if (housePlansRes && housePlansRes.ok) {
         const hpData = await housePlansRes.json();
-        setHousePlans(hpData.length > 0 ? hpData : defaultHousePlans);
+        const validPlans = Array.isArray(hpData) ? hpData.filter((p: any) => !isDemoHousePlan(p)) : [];
+        setHousePlans(validPlans);
       } else {
         const local = localStorage.getItem('lifehut_local_house_plans');
-        setHousePlans(local ? JSON.parse(local) : defaultHousePlans);
+        const parsed = local ? JSON.parse(local) : [];
+        setHousePlans(Array.isArray(parsed) ? parsed.filter(p => !isDemoHousePlan(p)) : []);
       }
 
       if (enquiriesRes && enquiriesRes.ok) {
@@ -162,7 +186,8 @@ export default function App() {
       setServices(localServices ? JSON.parse(localServices) : defaultServices);
       setProjects(localProjects ? JSON.parse(localProjects) : defaultProjects);
       setBlogs(localBlogs ? JSON.parse(localBlogs) : defaultBlogs);
-      setHousePlans(localHousePlans ? JSON.parse(localHousePlans) : defaultHousePlans);
+      const parsedPlans = localHousePlans ? JSON.parse(localHousePlans) : [];
+      setHousePlans(Array.isArray(parsedPlans) ? parsedPlans.filter(p => !isDemoHousePlan(p)) : []);
       setSettings(localSettings ? JSON.parse(localSettings) : defaultSettings);
       setEnquiries(localEnquiries ? JSON.parse(localEnquiries) : []);
       setLoading(false);
@@ -432,6 +457,7 @@ export default function App() {
                 }}
                 phone={phone}
                 settings={settings}
+                loading={loading}
               />
             </motion.div>
           )}

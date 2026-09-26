@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { HousePlan, RoomDimension } from '../types';
-import { defaultHousePlans } from '../data/defaultHousePlans';
+import { isDemoHousePlan } from '../lib/routing';
 import { saveSupabaseHousePlan, deleteSupabaseHousePlan, isSupabaseConfigured, uploadImageToSupabase, uploadZipToSupabase } from '../lib/supabase';
 import { 
   Home, 
@@ -104,7 +104,7 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
   refreshAllData,
   isStaticMode = false
 }) => {
-  const plans = housePlans && housePlans.length > 0 ? housePlans : defaultHousePlans;
+  const plans = (housePlans || []).filter(p => !isDemoHousePlan(p));
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -708,7 +708,26 @@ export const AdminHousePlans: React.FC<AdminHousePlansProps> = ({
         ))}
       </div>
 
-      {filteredPlans.length === 0 && (
+      {plans.length === 0 && (
+        <div className="bg-slate-50 border border-dashed border-slate-300 rounded-3xl p-12 text-center my-6">
+          <div className="w-12 h-12 rounded-2xl bg-blue-50 text-[#1A6DB5] flex items-center justify-center mx-auto mb-3">
+            <Home className="w-6 h-6" />
+          </div>
+          <h4 className="text-base font-bold text-slate-800 mb-1">No Uploaded House Plans in Supabase Storage</h4>
+          <p className="text-xs text-slate-500 max-w-md mx-auto mb-5">
+            Default plans are hidden. Any house plans you upload will be stored directly in Supabase and displayed live across all browsers.
+          </p>
+          <button
+            onClick={openCreateModal}
+            className="inline-flex items-center gap-2 bg-[#1A6DB5] hover:bg-[#155A96] text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-soft transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Upload First House Plan</span>
+          </button>
+        </div>
+      )}
+
+      {plans.length > 0 && filteredPlans.length === 0 && (
         <div className="text-center py-12 text-slate-400 text-xs">
           No house plans match "{searchQuery}".
         </div>

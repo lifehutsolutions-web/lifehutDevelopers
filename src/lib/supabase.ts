@@ -1,12 +1,14 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Service, Project, Enquiry, QuoteRequest, Settings, Testimonial, HousePlan } from '../types';
 import { defaultProjects } from '../data/defaults';
-import { defaultHousePlans } from '../data/defaultHousePlans';
 
-// Environment variables for Cloudflare / Vite
+// Environment variables for Cloudflare / Vite with automatic fallback
+const SUPABASE_DEFAULT_URL = "https://vkthcqceywhdlmjsvsze.supabase.co";
+const SUPABASE_DEFAULT_ANON_KEY = "sb_publishable__eUGKx9jON0kZ1dVrBRmLw_-huhN1d7";
+
 const env = ((import.meta as unknown as { env?: Record<string, string> }).env) || {};
-const supabaseUrl = env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || '';
+const supabaseUrl = env.VITE_SUPABASE_URL || SUPABASE_DEFAULT_URL;
+const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || SUPABASE_DEFAULT_ANON_KEY;
 
 export const isSupabaseConfigured = (): boolean => {
   return Boolean(
@@ -302,14 +304,54 @@ function parseProjectTags(rawTags: any, fallbackTags?: string[], projectName?: s
 // --- PROJECTS DB HELPERS ---
 export async function fetchSupabaseProjects(): Promise<Project[] | null> {
   if (!supabase) return null;
-  const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
-  if (error) {
-    console.error('Error fetching projects from Supabase:', error);
-    return null;
+  
+  let data: any[] | null = null;
+  let error: any = null;
+
+  try {
+    const res = await supabase.from('projects').select('*').order('created_at', { ascending: false });
+    data = res.data;
+    error = res.error;
+  } catch (err: any) {
+    error = err;
+  }
+
+  // Gracefully handle query timeouts or network glitches with fallback
+  if (error || !data) {
+    console.warn('Initial Supabase projects fetch notice, attempting quick fallback:', error?.message || error);
+    try {
+      const retry = await supabase.from('projects').select('*').limit(25);
+      if (!retry.error && retry.data && retry.data.length > 0) {
+        data = retry.data;
+        error = null;
+      }
+    } catch {}
+
+    if (!data || data.length === 0) {
+      try {
+        const srvRes = await fetch('/api/projects');
+        if (srvRes.ok) {
+          const srvData = await srvRes.json();
+          if (Array.isArray(srvData) && srvData.length > 0) {
+            return srvData;
+          }
+        }
+      } catch {}
+
+      try {
+        const local = localStorage.getItem('lifehut_local_projects');
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+
+      return defaultProjects;
+    }
   }
 
   // Fetch remote project metadata map from Supabase settings
-  const remoteMetaMap = await fetchProjectMetaFromSupabase();
+  const remoteMetaMap = await fetchProjectMetaFromSupabase().catch(() => ({}));
   const localMetaMap = getLocalProjectMetadataMap();
 
   const projectsToAutoBackfill: { id: string; clientName: string; clientTestimonial?: string; clientAvatar?: string; tags?: string[]; isRecent?: boolean }[] = [];
@@ -417,40 +459,12 @@ export async function fetchSupabaseProjects(): Promise<Project[] | null> {
     };
   });
 
-  // Auto-backfill empty client_name and tags metadata in Supabase in background
-  if (projectsToAutoBackfill.length > 0) {
-    setTimeout(async () => {
-      for (const p of projectsToAutoBackfill) {
-        try {
-          const updatePayload: Record<string, any> = {};
-          if (p.clientName) {
-            updatePayload.client_name = p.clientName;
-          }
-          if (p.clientTestimonial) {
-            updatePayload.client_testimonial = p.clientTestimonial;
-          }
-          if (p.clientAvatar) {
-            updatePayload.client_avatar = p.clientAvatar;
-          }
-
-          // Fetch current gallery and embed metadata
-          const { data: row } = await supabase.from('projects').select('gallery, hero_image').eq('id', p.id).single();
-          if (row) {
-            const rawG = Array.isArray(row.gallery) ? row.gallery : (row.hero_image ? [row.hero_image] : []);
-            const clean = rawG.filter((g: any) => typeof g === 'string' && !g.includes('__meta') && (g.startsWith('http') || g.startsWith('/')));
-            updatePayload.gallery = [
-              ...clean,
-              { __meta: { tags: p.tags, isRecent: p.isRecent, clientName: p.clientName, clientAvatar: p.clientAvatar } }
-            ];
-          }
-
-          await supabase.from('projects').update(updatePayload).eq('id', p.id);
-        } catch {
-          // Silent fallback
-        }
-      }
-    }, 100);
-  }
+  // Cache projects for instant offline & reload performance
+  try {
+    if (projects && projects.length > 0) {
+      localStorage.setItem('lifehut_local_projects', JSON.stringify(projects));
+    }
+  } catch {}
 
   return projects;
 }
@@ -793,19 +807,35 @@ export async function saveSupabaseTestimonial(testimonial: Testimonial): Promise
 // --- HOUSE PLANS DB HELPERS ---
 const LOCAL_HOUSE_PLANS_KEY = 'lifehut_local_house_plans';
 
+export const isDemoHousePlan = (p: HousePlan | any): boolean => {
+  if (!p) return true;
+  const demoCodes = ['LH-HP-1500', 'LH-HP-1800', 'LH-HP-2400', 'LH-HP-1200', 'LH-HP-2100', 'LH-HP-3200', 'LH-HP-1000', 'LH-HP-2700'];
+  const demoIds = ['lh-hp-1500-single-storey', 'lh-hp-1800-duplex-villa', 'lh-hp-2400-luxury-villa', 'lh-hp-1200-single-storey', 'lh-hp-2100-duplex-villa', 'lh-hp-3200-triplex-residence', 'lh-hp-1000-budget-storey', 'lh-hp-2700-duplex-house'];
+  const code = (p.planCode || p.plan_code || '').trim();
+  const id = (p.id || '').trim();
+  return demoCodes.includes(code) || demoIds.includes(id);
+};
+
 export async function fetchSupabaseHousePlans(): Promise<HousePlan[] | null> {
-  // 1. Check localStorage first for instant caching & offline access
-  let cachedPlans: HousePlan[] | null = null;
+  // 1. Check localStorage first for instant caching & offline access (purge any demo plans)
+  let cachedPlans: HousePlan[] = [];
   try {
     const raw = localStorage.getItem(LOCAL_HOUSE_PLANS_KEY);
     if (raw) {
-      cachedPlans = JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        cachedPlans = parsed.filter(p => !isDemoHousePlan(p));
+        // Clean localStorage if it contained stale demo plans
+        if (cachedPlans.length !== parsed.length) {
+          localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(cachedPlans));
+        }
+      }
     }
   } catch {
     // ignore local parse errors
   }
 
-  // 2. Try fetching from Supabase table 'house_plans'
+  // 2. Fetch from Supabase table 'house_plans'
   if (supabase) {
     try {
       const { data, error } = await supabase
@@ -814,42 +844,44 @@ export async function fetchSupabaseHousePlans(): Promise<HousePlan[] | null> {
         .order('created_at', { ascending: false });
 
       if (!error && data && data.length > 0) {
-        const plans: HousePlan[] = data.map(item => ({
-          id: item.id,
-          planCode: item.plan_code || item.planCode || 'LH-HP-000',
-          title: item.title,
-          slug: item.slug,
-          floors: Number(item.floors) || 1,
-          floorsLabel: item.floors_label || item.floorsLabel || `${item.floors || 1} Storey`,
-          bedrooms: Number(item.bedrooms) || 3,
-          bathrooms: Number(item.bathrooms) || 3,
-          builtUpArea: Number(item.built_up_area || item.builtUpArea) || 1500,
-          plotDimensions: item.plot_dimensions || item.plotDimensions || "30' x 50'",
-          buildingDimensions: item.building_dimensions || item.buildingDimensions || undefined,
-          facing: item.facing || 'East',
-          vastuCompliant: item.vastu_compliant !== undefined ? Boolean(item.vastu_compliant) : true,
-          vastuScore: item.vastu_score || item.vastuScore || '100% Vastu Compliant',
-          vastuNotes: Array.isArray(item.vastu_notes || item.vastuNotes) ? (item.vastu_notes || item.vastuNotes) : [],
-          style: item.style || 'Contemporary Modern',
-          carParking: Number(item.car_parking || item.carParking) || 1,
-          estimatedCostRange: item.estimated_cost_range || item.estimatedCostRange || '₹30L - ₹35L',
-          costPerSqft: item.cost_per_sqft || item.costPerSqft || '₹2,200 / sq.ft',
-          elevationImage: item.elevation_image || item.elevationImage || '',
-          floorPlanImage: item.floor_plan_image || item.floorPlanImage || '',
-          galleryImages: Array.isArray(item.gallery_images || item.galleryImages) ? (item.gallery_images || item.galleryImages) : [],
-          description: item.description || '',
-          roomDimensions: Array.isArray(item.room_dimensions || item.roomDimensions) ? (item.room_dimensions || item.roomDimensions) : [],
-          features: Array.isArray(item.features) ? item.features : [],
-          cadPackageZipUrl: item.cad_package_zip_url || item.cadPackageZipUrl || '',
-          cadPackageFileName: item.cad_package_file_name || item.cadPackageFileName || '',
-          cadPackageSize: item.cad_package_size || item.cadPackageSize || '',
-          cadPackagePrice: item.cad_package_price !== undefined ? Number(item.cad_package_price) : (item.cadPackagePrice !== undefined ? Number(item.cadPackagePrice) : 999),
-          cadPackageIncludes: Array.isArray(item.cad_package_includes || item.cadPackageIncludes) ? (item.cad_package_includes || item.cadPackageIncludes) : undefined,
-          seoMeta: item.seo_meta || item.seoMeta || undefined,
-          isFeatured: Boolean(item.is_featured || item.isFeatured),
-          isActive: item.is_active !== undefined ? Boolean(item.is_active) : true,
-          createdAt: item.created_at || item.createdAt
-        }));
+        const plans: HousePlan[] = data
+          .filter(item => !isDemoHousePlan({ planCode: item.plan_code || item.planCode, id: item.id }))
+          .map(item => ({
+            id: item.id,
+            planCode: item.plan_code || item.planCode || 'LH-HP-0001',
+            title: item.title,
+            slug: item.slug,
+            floors: Number(item.floors) || 1,
+            floorsLabel: item.floors_label || item.floorsLabel || `${item.floors || 1} Storey`,
+            bedrooms: Number(item.bedrooms) || 3,
+            bathrooms: Number(item.bathrooms) || 3,
+            builtUpArea: Number(item.built_up_area || item.builtUpArea) || 1500,
+            plotDimensions: item.plot_dimensions || item.plotDimensions || "30' x 50'",
+            buildingDimensions: item.building_dimensions || item.buildingDimensions || undefined,
+            facing: item.facing || 'East',
+            vastuCompliant: item.vastu_compliant !== undefined ? Boolean(item.vastu_compliant) : true,
+            vastuScore: item.vastu_score || item.vastuScore || '100% Vastu Compliant',
+            vastuNotes: Array.isArray(item.vastu_notes || item.vastuNotes) ? (item.vastu_notes || item.vastuNotes) : [],
+            style: item.style || 'Contemporary Modern',
+            carParking: Number(item.car_parking || item.carParking) || 1,
+            estimatedCostRange: item.estimated_cost_range || item.estimatedCostRange || '₹30L - ₹35L',
+            costPerSqft: item.cost_per_sqft || item.costPerSqft || '₹2,200 / sq.ft',
+            elevationImage: item.elevation_image || item.elevationImage || '',
+            floorPlanImage: item.floor_plan_image || item.floorPlanImage || '',
+            galleryImages: Array.isArray(item.gallery_images || item.galleryImages) ? (item.gallery_images || item.galleryImages) : [],
+            description: item.description || '',
+            roomDimensions: Array.isArray(item.room_dimensions || item.roomDimensions) ? (item.room_dimensions || item.roomDimensions) : [],
+            features: Array.isArray(item.features) ? item.features : [],
+            cadPackageZipUrl: item.cad_package_zip_url || item.cadPackageZipUrl || '',
+            cadPackageFileName: item.cad_package_file_name || item.cadPackageFileName || '',
+            cadPackageSize: item.cad_package_size || item.cadPackageSize || '',
+            cadPackagePrice: item.cad_package_price !== undefined ? Number(item.cad_package_price) : (item.cadPackagePrice !== undefined ? Number(item.cadPackagePrice) : 999),
+            cadPackageIncludes: Array.isArray(item.cad_package_includes || item.cadPackageIncludes) ? (item.cad_package_includes || item.cadPackageIncludes) : undefined,
+            seoMeta: item.seo_meta || item.seoMeta || undefined,
+            isFeatured: Boolean(item.is_featured || item.isFeatured),
+            isActive: item.is_active !== undefined ? Boolean(item.is_active) : true,
+            createdAt: item.created_at || item.createdAt
+          }));
 
         try {
           localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(plans));
@@ -864,12 +896,15 @@ export async function fetchSupabaseHousePlans(): Promise<HousePlan[] | null> {
       if (!settingsRes.error && settingsRes.data && settingsRes.data[0]?.stats?.house_plans) {
         const storedPlans = settingsRes.data[0].stats.house_plans;
         if (Array.isArray(storedPlans) && storedPlans.length > 0) {
-          try {
-            localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(storedPlans));
-          } catch {
-            // ignore
+          const clean = storedPlans.filter(p => !isDemoHousePlan(p));
+          if (clean.length > 0) {
+            try {
+              localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(clean));
+            } catch {
+              // ignore
+            }
+            return clean;
           }
-          return storedPlans;
         }
       }
     } catch (err) {
@@ -883,34 +918,39 @@ export async function fetchSupabaseHousePlans(): Promise<HousePlan[] | null> {
     if (res.ok) {
       const serverPlans = await res.json();
       if (Array.isArray(serverPlans) && serverPlans.length > 0) {
-        try {
-          localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(serverPlans));
-        } catch {
-          // ignore
+        const clean = serverPlans.filter(p => !isDemoHousePlan(p));
+        if (clean.length > 0) {
+          try {
+            localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(clean));
+          } catch {
+            // ignore
+          }
+          return clean;
         }
-        return serverPlans;
       }
     }
   } catch {
     // server unreachable or running in static export
   }
 
-  // 4. Return cached or default plans
-  return cachedPlans && cachedPlans.length > 0 ? cachedPlans : defaultHousePlans;
+  // 4. Return cached plans only, NEVER default demo plans
+  return cachedPlans;
 }
 
 export async function saveSupabaseHousePlan(plan: HousePlan): Promise<boolean> {
   // Update local storage immediately for fast UI feedback
   try {
-    const current = (await fetchSupabaseHousePlans()) || defaultHousePlans;
+    const current = (await fetchSupabaseHousePlans()) || [];
     // Sanitize for localStorage to prevent quota exhaustion
     const sanitizeForLocal = (p: HousePlan): HousePlan => {
-      if (p.cadPackageBase64 && p.cadPackageBase64.length > 50000) {
-        const copy = { ...p };
+      let copy = { ...p };
+      if (copy.cadPackageBase64 && copy.cadPackageBase64.length > 50000) {
         delete copy.cadPackageBase64;
-        return copy;
       }
-      return p;
+      if (copy.cadPackageZipUrl && copy.cadPackageZipUrl.length > 50000) {
+        copy.cadPackageZipUrl = copy.cadPackageZipUrl.slice(0, 100);
+      }
+      return copy;
     };
 
     const sanitizedPlan = sanitizeForLocal(plan);
@@ -987,7 +1027,9 @@ export async function saveSupabaseHousePlan(plan: HousePlan): Promise<boolean> {
       const res = await supabase.from('settings').select('*').limit(1);
       if (res.data && res.data.length > 0) {
         const row = res.data[0];
-        const existingPlans: HousePlan[] = Array.isArray(row.stats?.house_plans) ? row.stats.house_plans : [...defaultHousePlans];
+        const existingPlans: HousePlan[] = Array.isArray(row.stats?.house_plans)
+          ? row.stats.house_plans.filter((p: any) => !isDemoHousePlan(p))
+          : [];
         const idx = existingPlans.findIndex(p => p.id === plan.id || p.slug === plan.slug);
         if (idx >= 0) {
           existingPlans[idx] = plan;
@@ -1145,11 +1187,10 @@ export async function autoMigrateAndSyncSupabase(): Promise<void> {
     }
 
     // 4. If settings stats need sync, save them
-    if (hasStatsUpdate || !currentStats.house_plans || currentStats.house_plans.length === 0) {
+    if (hasStatsUpdate) {
       const mergedStats = {
         ...currentStats,
-        project_metadata_map: remoteMetaMap,
-        house_plans: (currentStats.house_plans && currentStats.house_plans.length > 0) ? currentStats.house_plans : defaultHousePlans
+        project_metadata_map: remoteMetaMap
       };
 
       if (settingsRow) {

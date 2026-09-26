@@ -163,6 +163,29 @@ export function navigateToRoute(route: AppRoute, replace = false): void {
 }
 
 /**
+ * Checks if a house plan object represents legacy hardcoded demo placeholder plans.
+ */
+export const isDemoHousePlan = (p: HousePlan | any): boolean => {
+  if (!p) return true;
+  const demoCodes = ['LH-HP-1500', 'LH-HP-1800', 'LH-HP-2400', 'LH-HP-1200', 'LH-HP-2100', 'LH-HP-3200', 'LH-HP-1000', 'LH-HP-2700'];
+  const demoIds = ['lh-hp-1500-single-storey', 'lh-hp-1800-duplex-villa', 'lh-hp-2400-luxury-villa', 'lh-hp-1200-single-storey', 'lh-hp-2100-duplex-villa', 'lh-hp-3200-triplex-residence', 'lh-hp-1000-budget-storey', 'lh-hp-2700-duplex-house'];
+  const demoSlugs = [
+    'one-storey-1500-sqft-contemporary-3bhk-house-plan',
+    'two-storey-1800-sqft-modern-duplex-villa-4bhk-house-plan',
+    'two-storey-2400-sqft-luxury-4bhk-independent-villa-plan',
+    'one-storey-1200-sqft-compact-2bhk-single-storey-house-plan',
+    'two-storey-2100-sqft-premium-duplex-villa-4bhk-house-plan',
+    'three-storey-3200-sqft-luxury-triplex-residence-5bhk-house-plan',
+    'one-storey-1000-sqft-budget-single-storey-2bhk-house-plan',
+    'two-storey-2700-sqft-executive-duplex-house-4bhk-house-plan'
+  ];
+  const code = (p.planCode || p.plan_code || '').trim();
+  const id = (p.id || '').trim();
+  const slug = (p.slug || '').trim();
+  return demoCodes.includes(code) || demoIds.includes(id) || demoSlugs.includes(slug);
+};
+
+/**
  * Robust matcher for house plans by slug, id, planCode, or title.
  * Supports:
  * - SEO-friendly slug: /house-plans/duplex-house-at-1000-sqft-plot

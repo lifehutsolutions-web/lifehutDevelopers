@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { HousePlan, HousePlanOrder, Settings } from '../types';
-import { defaultHousePlans } from '../data/defaultHousePlans';
+import { isDemoHousePlan } from '../lib/routing';
 import {
   TrendingUp,
   ShoppingBag,
@@ -49,7 +49,7 @@ export const AdminOrdersAndSales: React.FC<AdminOrdersAndSalesProps> = ({
   settings,
   isStaticMode = false
 }) => {
-  const plans = housePlans && housePlans.length > 0 ? housePlans : defaultHousePlans;
+  const plans = (housePlans || []).filter(p => !isDemoHousePlan(p));
 
   // Local state
   const [orders, setOrders] = useState<HousePlanOrder[]>([]);
@@ -105,7 +105,9 @@ export const AdminOrdersAndSales: React.FC<AdminOrdersAndSalesProps> = ({
         if (local) {
           const localOrders: HousePlanOrder[] = JSON.parse(local);
           if (Array.isArray(localOrders)) {
-            for (const lo of localOrders) {
+            // Filter out any legacy mock demo orders
+            const cleanLocalOrders = localOrders.filter(lo => !lo.id?.startsWith('ord_178490100'));
+            for (const lo of cleanLocalOrders) {
               const exists = combinedOrders.some(
                 co => co.id === lo.id ||
                      (lo.transactionId && co.transactionId === lo.transactionId) ||
