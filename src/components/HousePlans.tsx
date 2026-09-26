@@ -44,6 +44,34 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Breadcrumbs } from './Breadcrumbs';
 import { HousePlan, Settings, HousePlanOrder } from '../types';
 import { findPlan, getPlanShareUrl, isDemoHousePlan } from '../lib/routing';
+import * as SupabaseLib from '../lib/supabase';
+
+const persistOrderSafely = async (order: HousePlanOrder) => {
+  if (typeof (SupabaseLib as any).saveSupabaseOrder === 'function') {
+    try {
+      await (SupabaseLib as any).saveSupabaseOrder(order);
+      return;
+    } catch (err) {
+      console.warn('Could not sync order to Supabase:', err);
+    }
+  }
+  try {
+    await fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(order)
+    });
+  } catch {}
+  try {
+    const raw = localStorage.getItem('lifehut_local_orders');
+    const list: HousePlanOrder[] = raw ? JSON.parse(raw) : [];
+    const idx = list.findIndex(o => o.id === order.id);
+    if (idx >= 0) list[idx] = { ...list[idx], ...order };
+    else list.unshift(order);
+    localStorage.setItem('lifehut_local_orders', JSON.stringify(list));
+  } catch {}
+  window.dispatchEvent(new CustomEvent('lifehut_orders_updated', { detail: order }));
+};
 
 interface HousePlansProps {
   housePlans?: HousePlan[];
@@ -413,6 +441,27 @@ export const HousePlans: React.FC<HousePlansProps> = ({
           setAuthorizedDownloadUrl(claimData.downloadUrl);
           setPaymentTxnId(claimData.paymentId);
           setPaymentSuccess(true);
+
+          const freeOrder: HousePlanOrder = {
+            id: `ord_free_${Date.now()}`,
+            transactionId: claimData.paymentId || `TXN_FREE_${Date.now()}`,
+            planId: currentCadPlan.id,
+            planCode: currentCadPlan.planCode,
+            planTitle: currentCadPlan.title,
+            amount: 0,
+            currency: 'INR',
+            customerName: clientName || 'Verified Homeowner',
+            customerEmail: clientEmail || '',
+            customerPhone: clientPhone || '',
+            paymentMethod: 'Free Claim',
+            paymentStatus: 'Completed',
+            deliveryStatus: 'Delivered',
+            downloadUrl: claimData.downloadUrl,
+            createdAt: new Date().toISOString(),
+            notes: 'Free promotional blueprint claim'
+          };
+          await persistOrderSafely(freeOrder);
+
           triggerDownloadCadZip(currentCadPlan, claimData.downloadUrl);
         } else {
           setPaymentError(claimData?.message || 'Could not claim free download. Please contact support.');
@@ -581,35 +630,10 @@ export const HousePlans: React.FC<HousePlansProps> = ({
                 notes: 'Razorpay verified online checkout'
               };
 
-              // 2. Persist immediately to localStorage
-              try {
-                const existingRaw = localStorage.getItem('lifehut_local_orders');
-                const existingOrders: HousePlanOrder[] = existingRaw ? JSON.parse(existingRaw) : [];
-                const alreadyRecorded = existingOrders.some(
-                  o => (o.transactionId && o.transactionId === confirmedTxnId) ||
-                       (o.razorpayPaymentId && o.razorpayPaymentId === response.razorpay_payment_id)
-                );
-                if (!alreadyRecorded) {
-                  existingOrders.unshift(completedOrder);
-                  localStorage.setItem('lifehut_local_orders', JSON.stringify(existingOrders));
-                }
-              } catch (storageErr) {
-                console.warn('Could not save order to localStorage:', storageErr);
-              }
+              // 2. Persist immediately to Supabase, server API, and local cache
+              await persistOrderSafely(completedOrder);
 
-              // 3. Broadcast real-time order update event for Admin Orders & Sales dashboard
-              try {
-                window.dispatchEvent(new CustomEvent('lifehut_orders_updated', { detail: completedOrder }));
-              } catch {}
-
-              // 4. Save to Express server /api/orders
-              fetch('/api/orders', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(completedOrder)
-              }).catch(err => console.warn('Could not sync order to /api/orders:', err));
-
-              // 5. Trigger verified package download
+              // 3. Trigger verified package download
               triggerDownloadCadZip(currentCadPlan, downloadUrl);
             } else {
               setPaymentError(

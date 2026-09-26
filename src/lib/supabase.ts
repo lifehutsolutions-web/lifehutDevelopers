@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Service, Project, Enquiry, QuoteRequest, Settings, Testimonial, HousePlan } from '../types';
+import { Service, Project, Enquiry, QuoteRequest, Settings, Testimonial, HousePlan, HousePlanOrder } from '../types';
 import { defaultProjects } from '../data/defaults';
 
 // Environment variables for Cloudflare / Vite with automatic fallback
@@ -1125,6 +1125,187 @@ export async function deleteSupabaseHousePlan(id: string): Promise<boolean> {
   }
 
   return true;
+}
+
+// --- ORDERS DB HELPERS ---
+const LOCAL_ORDERS_KEY = 'lifehut_local_orders';
+
+export const isDemoOrder = (o: HousePlanOrder | any): boolean => {
+  if (!o) return true;
+  const id = (o.id || '').trim().toLowerCase();
+  const email = (o.customerEmail || '').trim().toLowerCase();
+  const name = (o.customerName || '').trim().toLowerCase();
+  const notes = (o.notes || '').trim().toLowerCase();
+  if (id.startsWith('ord_178490100') || id.startsWith('mock_') || id.startsWith('demo_') || id.startsWith('test_')) return true;
+  if (email.includes('example.com') || email === 'demo@lifehut.com') return true;
+  if (name === 'demo purchaser' || name === 'sample customer' || name === 'mock customer') return true;
+  if (notes.includes('mock demo order') || notes.includes('sample preview order')) return true;
+  return false;
+};
+
+export async function fetchSupabaseOrders(): Promise<HousePlanOrder[]> {
+  let combinedOrders: HousePlanOrder[] = [];
+
+  // 1. Fetch from Express server API (which syncs with Supabase)
+  try {
+    const res = await fetch('/api/orders');
+    if (res.ok) {
+      const serverOrders = await res.json();
+      if (Array.isArray(serverOrders)) {
+        for (const o of serverOrders) {
+          if (!isDemoOrder(o)) {
+            combinedOrders.push(o);
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 2. Fetch directly from Supabase settings.stats.orders as safety fallback
+  if (supabase) {
+    try {
+      const res = await supabase.from('settings').select('id, stats').limit(1);
+      if (!res.error && res.data && res.data.length > 0) {
+        const stats = res.data[0]?.stats;
+        if (stats && Array.isArray(stats.orders)) {
+          for (const sbOrder of stats.orders) {
+            if (!isDemoOrder(sbOrder)) {
+              const exists = combinedOrders.some(
+                co => co.id === sbOrder.id ||
+                  (sbOrder.transactionId && co.transactionId === sbOrder.transactionId) ||
+                  (sbOrder.razorpayPaymentId && co.razorpayPaymentId === sbOrder.razorpayPaymentId)
+              );
+              if (!exists) {
+                combinedOrders.push(sbOrder);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error reading orders from Supabase:', e);
+    }
+  }
+
+  // Sort descending by createdAt
+  combinedOrders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+  // Overwrite localStorage with only authentic, deduplicated orders (clearing out any stale 7 mock orders)
+  try {
+    localStorage.setItem(LOCAL_ORDERS_KEY, JSON.stringify(combinedOrders));
+  } catch {}
+
+  return combinedOrders;
+}
+
+export async function saveSupabaseOrder(order: HousePlanOrder): Promise<boolean> {
+  // 1. Sync to Express server API
+  try {
+    await fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(order)
+    });
+  } catch {}
+
+  // 2. Sync directly to Supabase settings.stats.orders
+  if (supabase) {
+    try {
+      const res = await supabase.from('settings').select('id, stats').limit(1);
+      if (!res.error && res.data && res.data.length > 0) {
+        const row = res.data[0];
+        const currentStats = row.stats || {};
+        const existingOrders: HousePlanOrder[] = Array.isArray(currentStats.orders) ? currentStats.orders.filter(o => !isDemoOrder(o)) : [];
+        const idx = existingOrders.findIndex(
+          o => o.id === order.id ||
+            (order.transactionId && o.transactionId === order.transactionId) ||
+            (order.razorpayPaymentId && o.razorpayPaymentId === order.razorpayPaymentId)
+        );
+        if (idx !== -1) {
+          existingOrders[idx] = { ...existingOrders[idx], ...order };
+        } else {
+          existingOrders.unshift(order);
+        }
+        await supabase.from('settings').update({
+          stats: { ...currentStats, orders: existingOrders },
+          updated_at: new Date().toISOString()
+        }).eq('id', row.id);
+      }
+    } catch (e) {
+      console.warn('Error saving order to Supabase:', e);
+    }
+  }
+
+  // 3. Update local storage
+  try {
+    const raw = localStorage.getItem(LOCAL_ORDERS_KEY);
+    const list: HousePlanOrder[] = raw ? JSON.parse(raw).filter((o: any) => !isDemoOrder(o)) : [];
+    const idx = list.findIndex(
+      o => o.id === order.id ||
+        (order.transactionId && o.transactionId === order.transactionId) ||
+        (order.razorpayPaymentId && o.razorpayPaymentId === order.razorpayPaymentId)
+    );
+    if (idx !== -1) {
+      list[idx] = { ...list[idx], ...order };
+    } else {
+      list.unshift(order);
+    }
+    localStorage.setItem(LOCAL_ORDERS_KEY, JSON.stringify(list));
+  } catch {}
+
+  // 4. Dispatch update event
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('lifehut_orders_updated', { detail: order }));
+  }
+
+  return true;
+}
+
+export async function deleteSupabaseOrder(orderId: string): Promise<boolean> {
+  // 1. Delete from server API
+  try {
+    await fetch(`/api/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' });
+  } catch {}
+
+  // 2. Delete from Supabase settings.stats.orders
+  if (supabase) {
+    try {
+      const res = await supabase.from('settings').select('id, stats').limit(1);
+      if (!res.error && res.data && res.data.length > 0) {
+        const row = res.data[0];
+        const currentStats = row.stats || {};
+        const existingOrders: HousePlanOrder[] = Array.isArray(currentStats.orders) ? currentStats.orders : [];
+        const filtered = existingOrders.filter(o => o.id !== orderId);
+        await supabase.from('settings').update({
+          stats: { ...currentStats, orders: filtered },
+          updated_at: new Date().toISOString()
+        }).eq('id', row.id);
+      }
+    } catch (e) {
+      console.warn('Error deleting order from Supabase:', e);
+    }
+  }
+
+  // 3. Update localStorage
+  try {
+    const raw = localStorage.getItem(LOCAL_ORDERS_KEY);
+    if (raw) {
+      const list: HousePlanOrder[] = JSON.parse(raw);
+      const filtered = list.filter(o => o.id !== orderId);
+      localStorage.setItem(LOCAL_ORDERS_KEY, JSON.stringify(filtered));
+    }
+  } catch {}
+
+  // 4. Dispatch update event
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('lifehut_orders_updated', { detail: { id: orderId, deleted: true } }));
+  }
+
+  return true;
+}
+
+export async function updateSupabaseOrder(order: HousePlanOrder): Promise<boolean> {
+  return saveSupabaseOrder(order);
 }
 
 /**

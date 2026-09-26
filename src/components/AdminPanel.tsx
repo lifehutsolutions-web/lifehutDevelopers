@@ -60,16 +60,48 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Active Admin Sub-tab
   const [activeSubTab, setActiveSubTab] = useState<'orders' | 'enquiries' | 'housePlans' | 'projects' | 'blogs' | 'services' | 'settings'>('orders');
-  const [ordersCount, setOrdersCount] = useState<number>(7);
+  const [ordersCount, setOrdersCount] = useState<number>(0);
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  useEffect(() => {
+  const fetchOrdersCount = () => {
     fetch('/api/orders')
       .then(res => res.json())
       .then(data => {
-        if (Array.isArray(data)) setOrdersCount(data.length);
+        if (Array.isArray(data)) {
+          // Count only authentic live orders (exclude demo orders)
+          const valid = data.filter((o: any) => {
+            const id = (o?.id || '').toLowerCase();
+            return !id.startsWith('ord_178490100') && !id.startsWith('mock_') && !id.startsWith('demo_');
+          });
+          setOrdersCount(valid.length);
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        try {
+          const raw = localStorage.getItem('lifehut_local_orders');
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              const valid = list.filter((o: any) => {
+                const id = (o?.id || '').toLowerCase();
+                return !id.startsWith('ord_178490100') && !id.startsWith('mock_') && !id.startsWith('demo_');
+              });
+              setOrdersCount(valid.length);
+            }
+          }
+        } catch {}
+      });
+  };
+
+  useEffect(() => {
+    fetchOrdersCount();
+
+    window.addEventListener('lifehut_orders_updated', fetchOrdersCount);
+    window.addEventListener('storage', fetchOrdersCount);
+    return () => {
+      window.removeEventListener('lifehut_orders_updated', fetchOrdersCount);
+      window.removeEventListener('storage', fetchOrdersCount);
+    };
   }, []);
 
   // Project Image Upload States
@@ -878,7 +910,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </h1>
           </div>
           <button
-            onClick={refreshAllData}
+            onClick={() => {
+              refreshAllData?.();
+              fetchOrdersCount();
+            }}
             className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -936,7 +971,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
             <div>
               <div className="text-slate-400 text-[10px] font-bold uppercase">House Plans</div>
-              <div className="text-xl sm:text-2xl font-extrabold text-[#1A2332] mt-0.5">{housePlans.length || 8}</div>
+              <div className="text-xl sm:text-2xl font-extrabold text-[#1A2332] mt-0.5">{housePlans.length}</div>
             </div>
           </div>
 
@@ -996,12 +1031,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         {/* Secondary Navigation (CMS subtabs) */}
         <div className="flex border-b border-slate-200 overflow-x-auto whitespace-nowrap mb-8 gap-6">
           {[
-            { id: 'orders', label: 'Orders & Sales', icon: ShoppingBag },
-            { id: 'enquiries', label: 'Client Lead Enquiries', icon: Users },
-            { id: 'housePlans', label: 'House Plans Catalog', icon: Home },
-            { id: 'projects', label: 'Projects Gallery', icon: Briefcase },
-            { id: 'blogs', label: 'Blog Manuals', icon: FileText },
-            { id: 'services', label: 'Specializations', icon: Check },
+            { id: 'orders', label: 'Orders & Sales', icon: ShoppingBag, count: ordersCount },
+            { id: 'enquiries', label: 'Client Lead Enquiries', icon: Users, count: enquiries.length },
+            { id: 'housePlans', label: 'House Plans Catalog', icon: Home, count: (housePlans || []).length },
+            { id: 'projects', label: 'Projects Gallery', icon: Briefcase, count: projects.length },
+            { id: 'blogs', label: 'Blog Manuals', icon: FileText, count: blogs.length },
+            { id: 'services', label: 'Specializations', icon: Check, count: services.length },
             { id: 'settings', label: 'Site Metrics & SEO', icon: SettingsIcon }
           ].map((tab) => {
             const Icon = tab.icon;
@@ -1017,6 +1052,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               >
                 <Icon className="w-4 h-4" />
                 <span>{tab.label}</span>
+                {typeof tab.count === 'number' && (
+                  <span className={`px-2 py-0.5 text-[11px] font-bold rounded-full transition-colors ${
+                    activeSubTab === tab.id ? 'bg-[#1A6DB5]/10 text-[#1A6DB5]' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {tab.count}
+                  </span>
+                )}
               </button>
             );
           })}
