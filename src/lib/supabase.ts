@@ -143,20 +143,29 @@ export async function uploadZipToSupabase(file: File, folder: string = 'cad-pack
 // --- SERVICES DB HELPERS ---
 export async function fetchSupabaseServices(): Promise<Service[] | null> {
   if (!supabase) return null;
-  const { data, error } = await supabase.from('services').select('*').order('created_at', { ascending: true });
-  if (error) {
-    console.error('Error fetching services from Supabase:', error);
+  try {
+    const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+      setTimeout(() => resolve({ data: null, error: new Error('Services query timeout') }), 2500)
+    );
+    const { data, error } = await Promise.race([
+      supabase.from('services').select('*').order('created_at', { ascending: true }),
+      timeoutPromise
+    ]);
+    if (error || !data) {
+      return null;
+    }
+    return data.map(item => ({
+      id: item.id,
+      title: item.title,
+      banner: item.banner || '',
+      description: item.description || '',
+      features: Array.isArray(item.features) ? item.features : [],
+      gallery: Array.isArray(item.gallery) ? item.gallery : [],
+      faqs: Array.isArray(item.faqs) ? item.faqs : []
+    }));
+  } catch {
     return null;
   }
-  return data.map(item => ({
-    id: item.id,
-    title: item.title,
-    banner: item.banner || '',
-    description: item.description || '',
-    features: Array.isArray(item.features) ? item.features : [],
-    gallery: Array.isArray(item.gallery) ? item.gallery : [],
-    faqs: Array.isArray(item.faqs) ? item.faqs : []
-  }));
 }
 
 export async function saveSupabaseService(service: Service): Promise<boolean> {
@@ -678,39 +687,48 @@ export async function insertSupabaseQuote(quote: QuoteRequest): Promise<boolean>
 // --- SETTINGS DB HELPERS ---
 export async function fetchSupabaseSettings(): Promise<Settings | null> {
   if (!supabase) return null;
-  const res = await supabase.from('settings').select('*').limit(1);
-  if (res.error || !res.data || res.data.length === 0) {
-    console.warn('No existing settings found in Supabase:', res.error?.message);
+  try {
+    const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+      setTimeout(() => resolve({ data: null, error: new Error('Settings query timeout') }), 2500)
+    );
+    const res = await Promise.race([
+      supabase.from('settings').select('*').limit(1),
+      timeoutPromise
+    ]);
+    if (res.error || !res.data || res.data.length === 0) {
+      return null;
+    }
+    const data = res.data[0];
+    return {
+      heroTitle: data.hero_title || '',
+      heroSubtitle: data.hero_subtitle || '',
+      heroBannerImage: data.hero_banner_image || '',
+      address: data.address || '',
+      phone: data.phone || '',
+      email: data.email || '',
+      hours: data.hours || '',
+      whatsappNumber: data.whatsapp_number || '',
+      facebookUrl: data.facebook_url || '',
+      instagramUrl: data.instagram_url || '',
+      pinterestUrl: data.pinterest_url || '',
+      youtubeUrl: data.youtube_url || '',
+      linkedinUrl: data.linkedin_url || '',
+      seoTitle: data.seo_title || '',
+      seoDescription: data.seo_description || '',
+      seoKeywords: data.seo_keywords || '',
+      stats: data.stats || {
+        projectsDone: "120+",
+        experienceYears: "7+",
+        clientSatisfaction: "99%",
+        hiddenCharges: "₹0"
+      },
+      razorpayKeyId: data.razorpayKeyId || data.stats?.razorpayKeyId || '',
+      razorpayKeySecret: data.razorpayKeySecret || data.stats?.razorpayKeySecret || '',
+      razorpayEnabled: data.razorpayEnabled !== undefined ? data.razorpayEnabled : (data.stats?.razorpayEnabled !== undefined ? data.stats.razorpayEnabled : true)
+    };
+  } catch {
     return null;
   }
-  const data = res.data[0];
-  return {
-    heroTitle: data.hero_title || '',
-    heroSubtitle: data.hero_subtitle || '',
-    heroBannerImage: data.hero_banner_image || '',
-    address: data.address || '',
-    phone: data.phone || '',
-    email: data.email || '',
-    hours: data.hours || '',
-    whatsappNumber: data.whatsapp_number || '',
-    facebookUrl: data.facebook_url || '',
-    instagramUrl: data.instagram_url || '',
-    pinterestUrl: data.pinterest_url || '',
-    youtubeUrl: data.youtube_url || '',
-    linkedinUrl: data.linkedin_url || '',
-    seoTitle: data.seo_title || '',
-    seoDescription: data.seo_description || '',
-    seoKeywords: data.seo_keywords || '',
-    stats: data.stats || {
-      projectsDone: "120+",
-      experienceYears: "7+",
-      clientSatisfaction: "99%",
-      hiddenCharges: "₹0"
-    },
-    razorpayKeyId: data.razorpayKeyId || data.stats?.razorpayKeyId || '',
-    razorpayKeySecret: data.razorpayKeySecret || data.stats?.razorpayKeySecret || '',
-    razorpayEnabled: data.razorpayEnabled !== undefined ? data.razorpayEnabled : (data.stats?.razorpayEnabled !== undefined ? data.stats.razorpayEnabled : true)
-  };
 }
 
 export async function saveSupabaseSettings(settings: Settings): Promise<boolean> {
@@ -838,10 +856,14 @@ export async function fetchSupabaseHousePlans(): Promise<HousePlan[] | null> {
   // 2. Fetch from Supabase table 'house_plans'
   if (supabase) {
     try {
-      const { data, error } = await supabase
-        .from('house_plans')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: new Error('House plans query timeout') }), 3000)
+      );
+
+      const { data, error } = await Promise.race([
+        supabase.from('house_plans').select('*').order('created_at', { ascending: false }),
+        timeoutPromise
+      ]);
 
       if (!error && data && data.length > 0) {
         const plans: HousePlan[] = data
@@ -892,7 +914,13 @@ export async function fetchSupabaseHousePlans(): Promise<HousePlan[] | null> {
       }
 
       // If 'house_plans' table does not exist or empty, check settings.stats.house_plans fallback
-      const settingsRes = await supabase.from('settings').select('*').limit(1);
+      const timeoutSettings = new Promise<{ data: null; error: Error }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: new Error('Settings timeout') }), 2000)
+      );
+      const settingsRes = await Promise.race([
+        supabase.from('settings').select('*').limit(1),
+        timeoutSettings
+      ]);
       if (!settingsRes.error && settingsRes.data && settingsRes.data[0]?.stats?.house_plans) {
         const storedPlans = settingsRes.data[0].stats.house_plans;
         if (Array.isArray(storedPlans) && storedPlans.length > 0) {

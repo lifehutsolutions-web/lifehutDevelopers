@@ -36,9 +36,27 @@ export default function App() {
   });
 
   // CMS Database States
-  const [services, setServices] = useState<Service[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [blogs, setBlogs] = useState<Blog[]>([]);
+  const [services, setServices] = useState<Service[]>(() => {
+    try {
+      const local = localStorage.getItem('lifehut_local_services');
+      if (local) return JSON.parse(local);
+    } catch {}
+    return defaultServices;
+  });
+  const [projects, setProjects] = useState<Project[]>(() => {
+    try {
+      const local = localStorage.getItem('lifehut_local_projects');
+      if (local) return JSON.parse(local);
+    } catch {}
+    return defaultProjects;
+  });
+  const [blogs, setBlogs] = useState<Blog[]>(() => {
+    try {
+      const local = localStorage.getItem('lifehut_local_blogs');
+      if (local) return JSON.parse(local);
+    } catch {}
+    return defaultBlogs;
+  });
   const [housePlans, setHousePlans] = useState<HousePlan[]>(() => {
     try {
       const local = localStorage.getItem('lifehut_local_house_plans');
@@ -54,143 +72,127 @@ export default function App() {
   });
   const [selectedPlanSlug, setSelectedPlanSlug] = useState<string | null>(null);
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState<Settings | null>(() => {
+    try {
+      const local = localStorage.getItem('lifehut_local_settings');
+      if (local) return JSON.parse(local);
+    } catch {}
+    return defaultSettings;
+  });
+  const [loading, setLoading] = useState(false);
+  const [isHousePlansLoading, setIsHousePlansLoading] = useState(false);
   const [isStaticMode, setIsStaticMode] = useState<boolean>(false);
 
-  // Synchronize state from Supabase or Express CMS REST APIs
+  // Synchronize state from Supabase or Express CMS REST APIs progressively
   const refreshAllData = async () => {
     try {
       if (isSupabaseConfigured()) {
-        const [sbServices, sbProjects, sbEnquiries, sbSettings, sbHousePlans] = await Promise.all([
-          fetchSupabaseServices(),
-          fetchSupabaseProjects(),
-          fetchSupabaseEnquiries(),
-          fetchSupabaseSettings(),
-          fetchSupabaseHousePlans()
-        ]);
-
-        let blogData: Blog[] = [];
-        try {
-          const blogRes = await fetch('/api/blogs');
-          if (blogRes.ok) blogData = await blogRes.json();
-        } catch {
-          const localBlogs = localStorage.getItem('lifehut_local_blogs');
-          blogData = localBlogs ? JSON.parse(localBlogs) : defaultBlogs;
-        }
-
-        setServices(sbServices && sbServices.length > 0 ? sbServices : defaultServices);
-        setProjects(sbProjects && sbProjects.length > 0 ? sbProjects : defaultProjects);
-        setBlogs(blogData && blogData.length > 0 ? blogData : defaultBlogs);
-
-        // House plans strictly from Supabase / server, no default demo plans
-        let validHousePlans = (sbHousePlans || []).filter(p => !isDemoHousePlan(p));
-        if (validHousePlans.length === 0) {
-          try {
-            const hpRes = await fetch('/api/house-plans');
-            if (hpRes.ok) {
-              const serverPlans = await hpRes.json();
-              if (Array.isArray(serverPlans) && serverPlans.length > 0) {
-                validHousePlans = serverPlans.filter((p: any) => !isDemoHousePlan(p));
-              }
+        // Fetch services in background
+        fetchSupabaseServices()
+          .then(sbServices => {
+            if (sbServices && sbServices.length > 0) {
+              setServices(sbServices);
+              try { localStorage.setItem('lifehut_local_services', JSON.stringify(sbServices)); } catch {}
             }
-          } catch {}
-        }
-        setHousePlans(validHousePlans);
-        if (validHousePlans.length > 0) {
-          try {
-            localStorage.setItem('lifehut_local_house_plans', JSON.stringify(validHousePlans));
-          } catch {}
-        }
-        setEnquiries(sbEnquiries || []);
-        setSettings(sbSettings || defaultSettings);
-        setLoading(false);
+          })
+          .catch(() => {});
 
-        // Run silent code-driven migration and synchronization in background without any UI disruption
+        // Fetch projects in background
+        fetchSupabaseProjects()
+          .then(sbProjects => {
+            if (sbProjects && sbProjects.length > 0) {
+              setProjects(sbProjects);
+              try { localStorage.setItem('lifehut_local_projects', JSON.stringify(sbProjects)); } catch {}
+            }
+          })
+          .catch(() => {});
+
+        // Fetch settings in background
+        fetchSupabaseSettings()
+          .then(sbSettings => {
+            if (sbSettings) {
+              setSettings(sbSettings);
+              try { localStorage.setItem('lifehut_local_settings', JSON.stringify(sbSettings)); } catch {}
+            }
+          })
+          .catch(() => {});
+
+        // Fetch enquiries in background
+        fetchSupabaseEnquiries()
+          .then(sbEnquiries => {
+            if (sbEnquiries) setEnquiries(sbEnquiries);
+          })
+          .catch(() => {});
+
+        // Fetch blogs
+        fetch('/api/blogs')
+          .then(r => r.json())
+          .then(bData => {
+            if (Array.isArray(bData) && bData.length > 0) {
+              setBlogs(bData);
+              try { localStorage.setItem('lifehut_local_blogs', JSON.stringify(bData)); } catch {}
+            }
+          })
+          .catch(() => {});
+
+        // Fetch house plans strictly from Supabase / server storage
+        setIsHousePlansLoading(true);
+        fetchSupabaseHousePlans()
+          .then(async (sbHousePlans) => {
+            let validHousePlans = (sbHousePlans || []).filter(p => !isDemoHousePlan(p));
+            if (validHousePlans.length === 0) {
+              try {
+                const hpRes = await fetch('/api/house-plans');
+                if (hpRes.ok) {
+                  const serverPlans = await hpRes.json();
+                  if (Array.isArray(serverPlans) && serverPlans.length > 0) {
+                    validHousePlans = serverPlans.filter((p: any) => !isDemoHousePlan(p));
+                  }
+                }
+              } catch {}
+            }
+            setHousePlans(validHousePlans);
+            if (validHousePlans.length > 0) {
+              try {
+                localStorage.setItem('lifehut_local_house_plans', JSON.stringify(validHousePlans));
+              } catch {}
+            }
+            setIsHousePlansLoading(false);
+          })
+          .catch(async () => {
+            try {
+              const hpRes = await fetch('/api/house-plans');
+              if (hpRes.ok) {
+                const serverPlans = await hpRes.json();
+                if (Array.isArray(serverPlans) && serverPlans.length > 0) {
+                  setHousePlans(serverPlans.filter((p: any) => !isDemoHousePlan(p)));
+                }
+              }
+            } catch {}
+            setIsHousePlansLoading(false);
+          });
+
+        // Run silent background sync after 2 seconds
         setTimeout(() => {
           autoMigrateAndSyncSupabase().catch(() => {});
-        }, 800);
+        }, 2000);
         return;
       }
 
-      const [servicesRes, projectsRes, blogsRes, enquiriesRes, settingsRes, housePlansRes] = await Promise.all([
-        fetch('/api/services').catch(() => null),
-        fetch('/api/projects').catch(() => null),
-        fetch('/api/blogs').catch(() => null),
-        fetch('/api/enquiries').catch(() => null),
-        fetch('/api/settings').catch(() => null),
-        fetch('/api/house-plans').catch(() => null),
-      ]);
-
-      if (servicesRes && servicesRes.ok) {
-        const sData = await servicesRes.json();
-        setServices(sData.length > 0 ? sData : defaultServices);
-      } else {
-        const local = localStorage.getItem('lifehut_local_services');
-        setServices(local ? JSON.parse(local) : defaultServices);
-      }
-
-      if (projectsRes && projectsRes.ok) {
-        const pData = await projectsRes.json();
-        setProjects(pData.length > 0 ? pData : defaultProjects);
-      } else {
-        const local = localStorage.getItem('lifehut_local_projects');
-        setProjects(local ? JSON.parse(local) : defaultProjects);
-      }
-
-      if (blogsRes && blogsRes.ok) {
-        const bData = await blogsRes.json();
-        setBlogs(bData.length > 0 ? bData : defaultBlogs);
-      } else {
-        const local = localStorage.getItem('lifehut_local_blogs');
-        setBlogs(local ? JSON.parse(local) : defaultBlogs);
-      }
-
-      if (housePlansRes && housePlansRes.ok) {
-        const hpData = await housePlansRes.json();
-        const validPlans = Array.isArray(hpData) ? hpData.filter((p: any) => !isDemoHousePlan(p)) : [];
-        setHousePlans(validPlans);
-      } else {
-        const local = localStorage.getItem('lifehut_local_house_plans');
-        const parsed = local ? JSON.parse(local) : [];
-        setHousePlans(Array.isArray(parsed) ? parsed.filter(p => !isDemoHousePlan(p)) : []);
-      }
-
-      if (enquiriesRes && enquiriesRes.ok) {
-        const eData = await enquiriesRes.json();
-        setEnquiries(eData || []);
-      } else {
-        const local = localStorage.getItem('lifehut_local_enquiries');
-        setEnquiries(local ? JSON.parse(local) : []);
-      }
-
-      if (settingsRes && settingsRes.ok) {
-        const stData = await settingsRes.json();
-        setSettings(stData || defaultSettings);
-      } else {
-        const local = localStorage.getItem('lifehut_local_settings');
-        setSettings(local ? JSON.parse(local) : defaultSettings);
-      }
-
-      setLoading(false);
+      // Non-Supabase API fallback
+      fetch('/api/services').then(r => r.json()).then(d => { if (d.length > 0) setServices(d); }).catch(() => {});
+      fetch('/api/projects').then(r => r.json()).then(d => { if (d.length > 0) setProjects(d); }).catch(() => {});
+      fetch('/api/blogs').then(r => r.json()).then(d => { if (d.length > 0) setBlogs(d); }).catch(() => {});
+      fetch('/api/enquiries').then(r => r.json()).then(d => { if (d) setEnquiries(d); }).catch(() => {});
+      fetch('/api/settings').then(r => r.json()).then(d => { if (d) setSettings(d); }).catch(() => {});
+      fetch('/api/house-plans').then(r => r.json()).then(d => {
+        if (Array.isArray(d)) {
+          setHousePlans(d.filter((p: any) => !isDemoHousePlan(p)));
+        }
+      }).catch(() => {});
     } catch (err) {
       console.warn("Activating local state fallback:", err);
       setIsStaticMode(true);
-      const localServices = localStorage.getItem('lifehut_local_services');
-      const localProjects = localStorage.getItem('lifehut_local_projects');
-      const localBlogs = localStorage.getItem('lifehut_local_blogs');
-      const localHousePlans = localStorage.getItem('lifehut_local_house_plans');
-      const localSettings = localStorage.getItem('lifehut_local_settings');
-      const localEnquiries = localStorage.getItem('lifehut_local_enquiries');
-
-      setServices(localServices ? JSON.parse(localServices) : defaultServices);
-      setProjects(localProjects ? JSON.parse(localProjects) : defaultProjects);
-      setBlogs(localBlogs ? JSON.parse(localBlogs) : defaultBlogs);
-      const parsedPlans = localHousePlans ? JSON.parse(localHousePlans) : [];
-      setHousePlans(Array.isArray(parsedPlans) ? parsedPlans.filter(p => !isDemoHousePlan(p)) : []);
-      setSettings(localSettings ? JSON.parse(localSettings) : defaultSettings);
-      setEnquiries(localEnquiries ? JSON.parse(localEnquiries) : []);
-      setLoading(false);
     }
   };
 
@@ -271,15 +273,6 @@ export default function App() {
   };
 
   const heroImage = "/src/assets/images/hero_villa_1784191464588.jpg";
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center text-slate-800 gap-3 font-display">
-        <div className="w-10 h-10 border-3 border-t-[#1A6DB5] border-slate-200 rounded-full animate-spin" />
-        <p className="text-xs font-bold uppercase tracking-widest text-[#1A6DB5] font-mono">Loading Lifehut...</p>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex flex-col justify-between bg-white">
@@ -457,7 +450,7 @@ export default function App() {
                 }}
                 phone={phone}
                 settings={settings}
-                loading={loading}
+                loading={isHousePlansLoading}
               />
             </motion.div>
           )}
