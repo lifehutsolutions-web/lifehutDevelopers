@@ -137,38 +137,28 @@ export default function App() {
 
         // Fetch house plans strictly from Supabase / server storage
         setIsHousePlansLoading(true);
-        fetchSupabaseHousePlans()
-          .then(async (sbHousePlans) => {
-            let validHousePlans = (sbHousePlans || []).filter(p => !isDemoHousePlan(p));
-            if (validHousePlans.length === 0) {
-              try {
-                const hpRes = await fetch('/api/house-plans');
-                if (hpRes.ok) {
-                  const serverPlans = await hpRes.json();
-                  if (Array.isArray(serverPlans) && serverPlans.length > 0) {
-                    validHousePlans = serverPlans.filter((p: any) => !isDemoHousePlan(p));
-                  }
-                }
-              } catch {}
+        fetch('/api/house-plans')
+          .then(r => r.json())
+          .then(plans => {
+            if (Array.isArray(plans)) {
+              const clean = plans.filter((p: any) => !isDemoHousePlan(p));
+              if (clean.length > 0) {
+                setHousePlans(clean);
+                setIsHousePlansLoading(false);
+              }
             }
-            setHousePlans(validHousePlans);
-            if (validHousePlans.length > 0) {
-              try {
-                localStorage.setItem('lifehut_local_house_plans', JSON.stringify(validHousePlans));
-              } catch {}
+          })
+          .catch(() => {});
+
+        fetchSupabaseHousePlans()
+          .then((sbHousePlans) => {
+            const valid = (sbHousePlans || []).filter(p => !isDemoHousePlan(p));
+            if (valid.length > 0) {
+              setHousePlans(valid);
             }
             setIsHousePlansLoading(false);
           })
-          .catch(async () => {
-            try {
-              const hpRes = await fetch('/api/house-plans');
-              if (hpRes.ok) {
-                const serverPlans = await hpRes.json();
-                if (Array.isArray(serverPlans) && serverPlans.length > 0) {
-                  setHousePlans(serverPlans.filter((p: any) => !isDemoHousePlan(p)));
-                }
-              }
-            } catch {}
+          .catch(() => {
             setIsHousePlansLoading(false);
           });
 

@@ -835,7 +835,21 @@ export const isDemoHousePlan = (p: HousePlan | any): boolean => {
 };
 
 export async function fetchSupabaseHousePlans(): Promise<HousePlan[] | null> {
-  // 1. Check localStorage first for instant caching & offline access (purge any demo plans)
+  // 1. Fast path: check express server /api/house-plans for sub-second retrieval
+  try {
+    const res = await fetch('/api/house-plans');
+    if (res.ok) {
+      const serverPlans = await res.json();
+      if (Array.isArray(serverPlans) && serverPlans.length > 0) {
+        const clean = serverPlans.filter(p => !isDemoHousePlan(p));
+        if (clean.length > 0) {
+          return clean;
+        }
+      }
+    }
+  } catch {}
+
+  // 2. Check localStorage
   let cachedPlans: HousePlan[] = [];
   try {
     const raw = localStorage.getItem(LOCAL_HOUSE_PLANS_KEY);
@@ -843,21 +857,15 @@ export async function fetchSupabaseHousePlans(): Promise<HousePlan[] | null> {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         cachedPlans = parsed.filter(p => !isDemoHousePlan(p));
-        // Clean localStorage if it contained stale demo plans
-        if (cachedPlans.length !== parsed.length) {
-          localStorage.setItem(LOCAL_HOUSE_PLANS_KEY, JSON.stringify(cachedPlans));
-        }
       }
     }
-  } catch {
-    // ignore local parse errors
-  }
+  } catch {}
 
-  // 2. Fetch from Supabase table 'house_plans'
+  // 3. Fetch from Supabase table 'house_plans' directly
   if (supabase) {
     try {
       const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
-        setTimeout(() => resolve({ data: null, error: new Error('House plans query timeout') }), 3000)
+        setTimeout(() => resolve({ data: null, error: new Error('House plans query timeout') }), 10000)
       );
 
       const { data, error } = await Promise.race([
